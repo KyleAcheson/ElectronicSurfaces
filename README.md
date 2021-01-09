@@ -4,6 +4,8 @@ Calculates potential energy surfaces for any tri-atomic molecule given a grid a 
 Can be run using no symmetry or with symmetry on - maximum symmetry is Cs. 
 Currently works for Molpro. 
 
+Ver2.0 - Splits state averaging of spin multiplicities
+
 ### To run:
 
 `./production_surfaces.py -inp input.json -g geom.xyz &`
