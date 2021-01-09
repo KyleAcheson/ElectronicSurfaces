@@ -147,6 +147,12 @@ if inputs['paxis'] not in paxisExcept:
 if inputs['spe'] not in exceptSPE:
     sys.exit("Error: '%s' not available, choose from %s." % (inputs['spe'], exceptSPE))
 
+# While waiting to add new functionality
+if inputs['spe'] == 'mrci' and inputs['grad'] == 'yes':
+    sys.exit("Error: Gradients for MRCI are yet to be added")
+if inputs['code'] == 'molcas':
+    sys.exit("Error: Molcas is not yet available")
+
 
 #########################
 # Quantum Code KEYWORDS #

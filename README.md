@@ -4,7 +4,7 @@ Calculates potential energy surfaces for any tri-atomic molecule given a grid a 
 Can be run using no symmetry or with symmetry on - maximum symmetry is Cs. 
 Currently works for Molpro. 
 
-Ver2.0 - Splits state averaging of spin multiplicities
+Ver2.0 - Splits state averaging of spin multiplicities.
 
 ### To run:
 
@@ -20,15 +20,17 @@ If using symmetry, ensure the unique symmetry axis chosen is compatable with the
 
 You should have extensively tested the levels of theory you wish to use for fitting surfaces prior to running.
 
-### FEATURES:
+### Features:
 
-Single point energies - CASSCF, CASPT2, MRCI
+Single point energies - CASSCF, CASPT2, MRCI.
 
-NACMEs (by finite differences) - CASSCF/ MRCI
+NACMEs (by finite differences) - CASSCF/ MRCI.
 
-Gradients - CASSCF (Analytical), MRCI (Numerical)
+Gradients - CASSCF (Analytical). Note analytical gradients require the use of spin-adapted CSFs and thus for gradients state-averaing is split over each spin multiplicity.
 
-Spin-orbit Couplings - CASSCF/ MRCI
+Numerical MRCI gradients to be added in if required.
+
+Spin-orbit Couplings - CASSCF/ MRCI.
 
 CASPT2 couplings and gradients can be calculated by a transformation of CASSCF level NACMEs/ Gradients using the PT2 mixing matrix.
 
@@ -42,26 +44,36 @@ If a calculation fails, elements of the output arrays for that grid point are se
 
 - [x] Routines for settuping up HF/CASSCF/CASPT2/MRCI blocks.
 
-- [x] Routine for calculting single point energies. 
+- [x] Routine for calculting single point energies (CASSCF/CASPT2/MRCI). 
 
-- [x] Routine for calculating SOC.
+- [x] Routine for calculating SOC (CASSCF/MRCI).
 
 - [x] Routine for displacing molecule along x, y, and z coordinate by distance dr (depending on unique axis chosen).
 
-- [x] Routine for setting up NACME calculation along each coordinate.
+- [x] Routine for calculating all possible combinations of coupled states.
 
-- [x] Routine for calculating Gradients.
+- [x] Routine for incrementing record files.
 
-- [x] Logic to determine symmetry vs no symmetry calculations.
+- [x] Routine for calculating transition dipole matrices.
+
+- [x] Routine for calculating NACMEs (CASSCF/ MRCI).
+
+- [x] Routine for calculating analytical gradients (CASSCF).
+
+- [ ] Routine for calculating numerical gradients (MRCI).
+
+- [x] Logic throughout whole programme to determine symmetry vs no symmetry calculations.
 
 - [x] Routines to store output data in arrays - energies, gradients, NACMEs.
 
-- [x] Parallel execution - Must force sharing of arrays for global data storage.
+- [x] Parallel execution - Must force sharing of array memory for global data storage.
 
 - [ ] Routine to extract SOC.
 
 - [ ] Internal coordinate routine for spherical coordinates. Option to use this or feed a predefined list of arrays to the programme.
 
 - [ ] Routine to extract CASPT2 mixing matrix.
+
+- [ ] Add functionality to run on a HPC queuing system.
 
 - [ ] Extend to Molcas - Framework already in place, just rewrite molpro.py in molcas format in molcas.py. 

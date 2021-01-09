@@ -30,7 +30,7 @@ def setupSPE(inputs: dict, geom, pwd: str, gp: int) -> str:
     calculationSPE.extend([initCalc, geometryBlock])
 
     #  Set up chosen electronic structure theory
-    casscf = casscfSetup(inputs, nacme=False)
+    casscf = casscfSetup(inputs, nacme=False, splitSpin=False)
     casscf = '\n'.join(casscf)
     if inputs['spe'] == 'casscf':
         calculationSPE.append(casscf)
@@ -81,7 +81,7 @@ def nacmeSetup(inputs: dict, refGeom, workdir: str, gp: int) -> (str, list):
     [nacmeRef, wfsRef, tdmsRef] = nacmeReferanceSetup(inputs, refGeom, noexc)
 
     # Initialise displaced geoms to be used in following calculation
-    casscf = casscfSetup(inputs, nacme=True)
+    casscf = casscfSetup(inputs, nacme=True, splitSpin=False)
     casscfIndexs = [ind for ind, line in enumerate(casscf) if 'casscf' in line]
     casscf = casscf[casscfIndexs[-1]:]  # For displaced calc - only need final CAS projection
     casscf = '\n'.join(casscf)
@@ -114,7 +114,7 @@ def nacmeReferanceSetup(inputs: dict, refGeom, noexc: bool) -> (list, list, list
     nacmeRef = []
     initCalc = "***NACME Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
     geometryBlock = geometrySetup(inputs, refGeom)
-    casscf = casscfSetup(inputs, nacme=False)
+    casscf = casscfSetup(inputs, nacme=False, splitSpin=False)
     nacmeRef.extend([initCalc, '\n'.join(geometryBlock), '\n'.join(casscf), '\n'])
     # Set up following CI calculation for reference - do tdm calculation
     ciwf = mrciSetup(inputs, 6000.2, 8000.2, noexc, tdm=True)
@@ -162,19 +162,33 @@ def gradientSetup(inputs: dict, geom, workdir: str, gp: int):
        gradients are calculated using the rs2 programme. For MRCI numerical
        gradientds are used."""
     gradientCalculation = []
+    states = inputs['states'][-1]
     gradWorkdir = "%s/GRAD/" % workdir
     inputfile = "GRAD_GP%s.input" % gp
     os.mkdir(gradWorkdir)
     initCalc = "***GRAD Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
     geometryBlock = geometrySetup(inputs, geom)
-    geometryBlock = '\n'.join(geometryBlock)
-    casscf = casscfSetup(inputs, nacme=False)
-    casscf = '\n'.join(casscf)
-    gradientCalculation.extend([initCalc, geometryBlock, casscf])
-
+    gradientCalculation.extend([initCalc, '\n'.join(geometryBlock)])
     if inputs['spe'] != 'mrci':
-        gradients = caspt2Setup(inputs, grad=True)
-        gradientCalculation.append('\n'.join(gradients))
+        if inputs['singlets'] and inputs['triplets'] == 'yes':
+            nSinglets = sum(states[:2])
+            nTriplets = sum(states[2:])
+            casscf = casscfSetup(inputs, nacme=False, splitSpin=True)
+            casscfIndex = [ind for ind, line in enumerate(casscf) if 'casscf' in line]
+            casscfInit = casscf[:casscfIndex[-2]]
+            casscfSinglet = casscf[casscfIndex[-2]:casscfIndex[-1]]
+            casscfTriplet = casscf[casscfIndex[-1]:]
+            gradients = caspt2Setup(inputs, grad=True)
+            singletGradients = gradients[:nSinglets]
+            tripletGradients = gradients[nSinglets:]
+            gradientCalculation.extend(['\n'.join(casscfInit), '\n'.join(casscfSinglet),
+                                        '\n'.join(singletGradients), '\n'.join(casscfTriplet),
+                                        '\n'.join(tripletGradients)])
+        else:
+            casscf = casscfSetup(inputs, nacme=False, splitSpin=False)
+            gradients = caspt2Setup(inputs, grad=True)
+            gradientCalculation.extend(['\n'.join(casscf), '\n'.join(gradients)])
+
     elif inputs['spe'] == 'mrci':
         pass  # TO DO - Numerical grads
 
@@ -313,7 +327,7 @@ def geometrySetup(inputs: dict, geom) -> list:
     return geometryBlock
 
 
-def casscfSetup(inputs: dict, nacme: bool) -> list:
+def casscfSetup(inputs: dict, nacme: bool, splitSpin: bool) -> list:
     """Sets up N single point calculations at the CASSCF level given N active spaces
     and states. Works for any combination of symmetry and multiplicities."""
     casscfBlock = []
@@ -335,7 +349,10 @@ def casscfSetup(inputs: dict, nacme: bool) -> list:
                 wf2 = "wf,%s,2,0\nstate,%s" % (inputs['nelec'], states[1])
                 wf3 = "wf,%s,1,2\nstate,%s" % (inputs['nelec'], states[2])
                 wf4 = "wf,%s,2,2\nstate,%s\n};" % (inputs['nelec'], states[3])
-                casscfBlock.extend([wf1, wf2, wf3, wf4])
+                if splitSpin:  # For analytical gradient calculations
+                    casscfBlock.extend([wf1, wf2+'};', casscf, wf3, wf4])  # can not SA over diff spin states here
+                else:
+                    casscfBlock.extend([wf1, wf2, wf3, wf4])  # Do SA over different spins
             elif inputs['singlets'] == 'yes' and inputs['triplets'] == 'no':
                 wf1 = "wf,%s,1,0\nstate,%s" % (inputs['nelec'], states[0])
                 wf2 = "wf,%s,2,0\nstate,%s\n};" % (inputs['nelec'], states[1])
@@ -358,15 +375,18 @@ def casscfSetup(inputs: dict, nacme: bool) -> list:
             casscfBlock.append(casscf)
             if inputs['singlets'] == 'yes' and inputs['triplets'] == 'yes':
                 wf1 = "wf,%s,1,0\nstate,%s" % (inputs['nelec'], states[0])  # Only one irrep for each spin
-                wf2 = "wf,%s,1,2\nstate,%s" % (inputs['nelec'], states[2])  # if no symm is chosen
-                casscfBlock.extend([wf1, wf2])
+                wf2 = "wf,%s,1,2\nstate,%s};" % (inputs['nelec'], states[2])  # if no symm is chosen
+                if splitSpin:  # do not SA over different spin multiplicities
+                    casscfBlock.extend([wf1+'};', casscf, wf2])
+                else:
+                    casscfBlock.extend([wf1, wf2])
             elif inputs['singlets'] == 'yes' and inputs['triplets'] == 'no':
-                wf1 = "wf,%s,1,0\nstate,%s" % (inputs['nelec'], states[0])
+                wf1 = "wf,%s,1,0\nstate,%s};" % (inputs['nelec'], states[0])
                 wf2 = ""
                 casscfBlock.extend([wf1, wf2])
             elif inputs['singlets'] == 'no' and inputs['triplets'] == 'yes':
                 wf1 = ""
-                wf2 = "wf,%s,1,2\nstate,%s" % (inputs['nelec'], states[2])
+                wf2 = "wf,%s,1,2\nstate,%s};" % (inputs['nelec'], states[2])
                 casscfBlock.extend([wf1, wf2])
 
     return casscfBlock
@@ -419,12 +439,11 @@ def caspt2Setup(inputs: dict, grad: bool) -> list:
         if states[i] != 0:
             if not grad:
                 caspt2 = "{rs2,shift=%s,MIX=%s,XMS=1\n%s\nstate,%s};" % (inputs['level_shift'], states[i], wfs[i], states[i])
+                caspt2Block.append(caspt2)
             else:
                 for root in range(states[i]):
                     caspt2 = "{rs2;NOEXC\n%s\nOPTION,NSTATI=%s;state,1,%s};\nforces" % (wfs[i], states[i], root+1)
                     caspt2Block.append(caspt2)
-
-            caspt2Block.append(caspt2)
 
     return caspt2Block
 
