@@ -1,13 +1,12 @@
 #!/usr/bin/python3
 import os
+import re
 import sys
 import multiprocessing
 import numpy as np
-import scipy.io
 import argparse
 import textwrap
 import json
-import copy
 import setup
 import utilities as util
 import molpro
@@ -21,137 +20,235 @@ parser.add_argument("-inp", dest="inputfile", required=True, type=str,
                     Input options in Json format\n
                     Required Input Specifications:\n
                     "code": molpro/molcas
+                    "queue" : submission command for running via HPC que, set none if not required
                     "mem": file memory
                     "symm": Symmetry generator (X, Y, Z) or  'nosymm' - max Cs symmetry
                     "basis": basis set in chosen programme format
                     "soc": yes/no
                     "nacme": yes/no
                     "nacme_level": casscf/mrci
-                    "dr": displacement value (angstrom) if nacmes are numerical
+                    "dr": displacement value (ANGSTROM) if nacmes are numerical
                     "paxis": principle axis
                     "grad": yes/no - gradient calculation
                     "spe": casscf/mrci/caspt2 - single point energy calculation
                     "atoms": list of atoms (list of str)
-                    "nelec": number electrions (int)
+                    "nelec": number electrons (int)
+                    "singlets": yes/no
+                    "triplets": yes/no
                     "occ": nlists of occupied orbitals - [[Irrep1, Irrep2], ... ]
                     "closed": nlists of closed orbitals - [[Irrep1, Irrep2], ... ]
-                    "states": nists of no. states - [[Irrep1, Irrep2], ... ]\n
-                    Optional Input Specifications:\n
-                    "pspace": molpro pspace thresh\n
+                    "states": nists of no. states - [[Irrep1(S=0), Irrep2(S=0), Irrep1(S=2), Irrep2(S=2)], ... ]\n
                     NB:
                     Can provide n lists (n = 1, 2, 3...) of orbitals and states
                     to project through active spaces at CASSCF level.
                     If a MR method is chosen, the MR calculation will corrospond
                     to the last list of active space and states.\n
                     If running with  symmetry off, set the orbitals and states
-                    that corrospond to Irrep2 to 0.\n'''))
+                    that corrospond to Irrep2 to 0.\n
+                    If running singlet or triplet states only, set the multiplicity
+                    you wish to ommit to 0.'''))
 parser.add_argument("-g", dest="inputGeomFile", required=True, type=str,
-                    help="Geometry in xyz coordinates at equalibrium.")
+                    help="Geometry in xyz coordinates (ANGSTROM) at equalibrium.")
+parser.add_argument("-q", dest="scriptHPC", required=False, type=str,
+                    help="Submission script template for running on a HPC queueing system.")
+
 args = parser.parse_args()
 inp = args.inputfile
 inputGeom = args.inputGeomFile
+submitScript = args.scriptHPC
+
+# Load inputs
+f = open(inp, 'r')
+inputs = json.load(f)
+f.close()
+
+f = open(inputGeom, 'r')
+refGeom = np.genfromtxt(f, usecols=(1, 2, 3), encoding=None)
+f.close()
+
+try:
+    f = open(submitScript, 'r')
+    submissionScriptLines = f.readlines()
+    f.close()
+    submissionScript = ''.join(submissionScriptLines)
+except TypeError:
+    submissionScript = None
+
 
 ##################
 #  Sanity Checks #
 ##################
 
-requiredInputs = ["code", "mem", "symm", "basis", "soc", "dr", "paxis",
-                   "nacme", "nacme_level", "grad", "spe", "nelec", "occ",
-                   "atoms", "closed", "states"]
+
+requiredInputs = ["code", "queue", "mem", "symm", "basis", "soc", "dr", "paxis",
+                  "nacme", "nacme_level", "grad", "spe", "nelec", "occ",
+                  "atoms", "closed", "states", "singlets", "triplets"]
+
+codeExcept = ['molpro', 'molcas']
+ynExcept = ['yes', 'no']  # For all y/n inputs
+symmExcept = ['x', 'y', 'z', 'nosymm']
+nacmeExcept = ['casscf', 'mrci']
+paxisExcept = ['x', 'y', 'z']
+exceptSPE = ['casscf', 'mrci', 'caspt2']
 
 inputError = ("ERROR: Missing required input fields from input.json.\n"
-               "RUN: %s --help for a list of fields." % sys.argv[0])
+              "RUN: %s --help for a list of fields." % sys.argv[0])
 
-# Load input params in json format into dict
-f = open(inp, 'r')
-inputs = json.load(f)
-f.close()
+
+class InputGeomError(Exception):
+    def __init__(self, geom, message='Number of user specified atoms does not match input geometry in xyz format'):
+        self.geom = geom
+        self.message = message
+        super().__init__(self.message)
+
+
 # Make sure all keys are correct case
+
 inputs = {k.lower(): v for k, v in inputs.items()}
 
 # Check all required input params provided
+
 for k in requiredInputs:
     if k not in inputs.keys():
-        sys.exit(inputError)
+        raise ValueError(inputError)
 
 # Check input params have correct data type
+
 if not isinstance(inputs['code'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['code'])
+    raise ValueError("Error: '%s' must be type str" % inputs['code'])
+if not isinstance(inputs['queue'], str):
+    raise ValueError("Error: '%s' must be type str" % inputs['queue'])
 if not isinstance(inputs['mem'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['mem'])
+    raise ValueError("Error: '%s' must be type str" % inputs['mem'])
 if not isinstance(inputs['symm'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['symm'])
+    raise ValueError("Error: '%s' must be type str" % inputs['symm'])
 if not isinstance(inputs['singlets'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['singlets'])
+    raise ValueError("Error: '%s' must be type str" % inputs['singlets'])
 if not isinstance(inputs['triplets'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['triplets'])
+    raise ValueError("Error: '%s' must be type str" % inputs['triplets'])
 if not isinstance(inputs['basis'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['basis'])
+    raise ValueError("Error: '%s' must be type str" % inputs['basis'])
 if not isinstance(inputs['soc'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['soc'])
+    raise ValueError("Error: '%s' must be type str" % inputs['soc'])
 if not isinstance(inputs['nacme'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['nacme'])
+    raise ValueError("Error: '%s' must be type str" % inputs['nacme'])
 if not isinstance(inputs['nacme_level'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['nacme_level'])
+    raise ValueError("Error: '%s' must be type str" % inputs['nacme_level'])
 if not isinstance(inputs['grad'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['grad'])
+    raise ValueError("Error: '%s' must be type str" % inputs['grad'])
 if not isinstance(inputs['spe'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['spe'])
+    raise ValueError("Error: '%s' must be type str" % inputs['spe'])
 if not isinstance(inputs['paxis'], str):
-    sys.exit("Error: '%s' must be type str" % inputs['paxis'])
+    raise ValueError("Error: '%s' must be type str" % inputs['paxis'])
 if not isinstance(inputs['atoms'], list):
-    sys.exit("Error: '%s' must be type list of str" % inputs['atoms'])
+    raise ValueError("Error: '%s' must be type list of str" % inputs['atoms'])
 if not isinstance(inputs['nelec'], int):
-    sys.exit("Error: '%s' must be type int" % inputs['nelec'])
+    raise ValueError("Error: '%s' must be type int" % inputs['nelec'])
 if not isinstance(inputs['dr'], float):
-    sys.exit("Error: '%s' must be type float" % inputs['dr'])
+    raise ValueError("Error: '%s' must be type float" % inputs['dr'])
 if not isinstance(inputs['occ'], list):
-    sys.exit("Error: '%s' must be type list of lists of int" % inputs['occ'])
+    raise ValueError("Error: '%s' must be type list of lists of int" % inputs['occ'])
 if not isinstance(inputs['closed'], list):
-    sys.exit("Error: '%s' must be type list of lists of int" % inputs['closed'])
+    raise ValueError("Error: '%s' must be type list of lists of int" % inputs['closed'])
 if not isinstance(inputs['states'], list):
-    sys.exit("Error: '%s' must be type list of lists of int" % inputs['states'])
+    raise ValueError("Error: '%s' must be type list of lists of int" % inputs['states'])
 
 # Ensure values of type str are lowercase
+
 for k, v in inputs.items():
     if isinstance(v, str):
         inputs[k] = v.lower()
 inputs['dr'] = inputs['dr']*ang2au
 
 # Check inputs have acceptable values
-codeExcept = ['molpro', 'molcas']
-ynExcept = ['yes', 'no']
-symmExcept = ['x', 'y', 'z', 'nosymm']
-nacmeExcept = ['casscf', 'mrci']
-paxisExcept = ['x', 'y', 'z']
-exceptSPE = ['casscf', 'mrci', 'caspt2']
 
 if inputs['code'] not in codeExcept:
-    sys.exit("Error: '%s' not available, choose from %s." % (inputs['code'], codeExcept))
+    raise ValueError("Error: '%s' not available, choose from %s." % (inputs['code'], codeExcept))
 if inputs['symm'] not in symmExcept:
-    sys.exit("Error: choose from %s." % (symmExcept))
+    raise ValueError("Error: choose from %s." % (symmExcept))
 if inputs['soc'] not in ynExcept:
-    sys.exit("Error: choose from %s." % (ynExcept))
+    raise ValueError("Error: choose from %s." % (ynExcept))
 if inputs['nacme'] not in ynExcept:
-    sys.exit("Error: choose from %s." % (ynExcept))
+    raise ValueError("Error: choose from %s." % (ynExcept))
 if inputs['grad'] not in ynExcept:
-    sys.exit("Error: choose from %s." % (ynExcept))
+    raise ValueError("Error: choose from %s." % (ynExcept))
 if inputs['singlets'] not in ynExcept:
-    sys.exit("Error: choose from %s." % (ynExcept))
+    raise ValueError("Error: choose from %s." % (ynExcept))
 if inputs['triplets'] not in ynExcept:
-    sys.exit("Error: choose from %s." % (ynExcept))
+    raise ValueError("Error: choose from %s." % (ynExcept))
 if inputs['nacme_level'] not in nacmeExcept:
-    sys.exit("Error: '%s' not available, choose from %s." % (inputs['nacme_level'], nacmeExcept))
+    raise ValueError("Error: '%s' not available, choose from %s." % (inputs['nacme_level'], nacmeExcept))
 if inputs['paxis'] not in paxisExcept:
-    sys.exit("Error: '%s' not available, choose from %s." % (inputs['paxis'], paxisExcept))
+    raise ValueError("Error: '%s' not available, choose from %s." % (inputs['paxis'], paxisExcept))
 if inputs['spe'] not in exceptSPE:
-    sys.exit("Error: '%s' not available, choose from %s." % (inputs['spe'], exceptSPE))
+    raise ValueError("Error: '%s' not available, choose from %s." % (inputs['spe'], exceptSPE))
+
+
+# Check input state and orbitals are correct
+
+if inputs['singlets'] == 'yes':
+    for nstates in inputs['states']:
+        if inputs['symm'] != 'nosymm':
+            if not isinstance(nstates[0], int) or not isinstance(nstates[1], int):
+                raise ValueError('Please set number of singlet states')
+        elif inputs['symm'] == 'nosymm':
+            if not isinstance(nstates[0], int) or nstates[1] != 0:
+                raise ValueError('Please set number of singlet states for irrep 1 to an integer and irrep 2 to 0.')
+elif inputs['singlets'] == 'no':
+    for nstates in inputs['states']:
+        if nstates[0] != 0 and nstates[1] != 0:
+            raise ValueError('Singlets input set to no, please set singlet states for both irreps to 0.')
+
+if inputs['triplets'] == 'yes':
+    for nstates in inputs['states']:
+        if inputs['symm'] != 'nosymm':
+            if not isinstance(nstates[2], int) or not isinstance(nstates[3], int):
+                raise ValueError('Please set number of triplet states')
+        elif inputs['symm'] == 'nosymm':
+            if not isinstance(nstates[2], int) or nstates[3] != 0:
+                raise ValueError('Please set number of triplet states for irrep 1 to an integer and irrep 2 to 0.')
+elif inputs['triplets'] == 'no':
+    for nstates in inputs['states']:
+        if nstates[2] != 0 and nstates[3] != 0:
+            raise ValueError('Triplets input set to no, please set triplet states for both irreps to 0.')
+
+for occOrb in inputs['occ']:
+    if inputs['symm'] != 'nosymm':
+        if not isinstance(occOrb[0], int) or not isinstance(occOrb[1], int):
+            raise ValueError('Ensure occupied orbitals are integers for both irreps.')
+    elif inputs['symm'] == 'nosymm':
+        if not isinstance(occOrb[0], int) or occOrb[1] != 0:
+            raise ValueError('Ensure occupied orbitals of irrep 1 is an integer and irrep 2 is 0.')
+
+for closedOrb in inputs['closed']:
+    if inputs['symm'] == 'yes':
+        if not isinstance(closedOrb[0], int) or not isinstance(closedOrb[1], int):
+            raise ValueError('Ensure closed orbitals are integers for both irreps.')
+    elif inputs['symm'] == 'nosymm':
+        if not isinstance(closedOrb[0], int) or closedOrb[1] != 0:
+            raise ValueError('Ensure closed orbitals of irrep 1 is an integer and irrep 2 is 0.')
+
+
+# Ensure input geometry and HPC queue submission script is correct
+
+if refGeom.shape != (len(inputs['atoms']), 3):
+    raise InputGeomError(refGeom)
+
+if submitScript is None and inputs['queue'] != 'none':
+    raise ValueError("Error: If not running via. a queueing system set queue input to none")
+elif submitScript is not None and inputs['queue'] == 'none':
+    raise ValueError("Error: If running via. a queueing system set queue input to the HPC submission command")
+
+if submissionScript is not None and not re.search(r'template', submissionScript):
+    raise ValueError("Error: Place the keyword 'template' where your input file goes in the HPC submission script")
+
 
 # While waiting to add new functionality
+
 if inputs['spe'] == 'mrci' and inputs['grad'] == 'yes':
-    sys.exit("Error: Gradients for MRCI are yet to be added")
+    raise ValueError("Error: Gradients for MRCI are yet to be added")
 if inputs['code'] == 'molcas':
-    sys.exit("Error: Molcas is not yet available")
+    raise ValueError("Error: Molcas is not yet available")
 
 
 #########################
@@ -159,10 +256,10 @@ if inputs['code'] == 'molcas':
 #########################
 
 molproKeys = {'cas_prog': '1PROGRAM * MULTI',
-               'nacme_regex': '!Total NACME.*$',
-               'termination_code': 'Variable memory released',
-               'submit_command': 'molpro',
-               'output_ext': 'out'}
+              'nacme_regex': '!Total NACME.*$',
+              'termination_code': 'Variable memory released',
+              'submit_command': 'molpro',
+              'output_ext': 'out'}
 
 molcasKeys = {}  # TO DO
 
@@ -181,12 +278,19 @@ if inputs['code'] == 'molpro':  # Set input dependent keys
         molproKeys['grad_regex'] = 'RSPT2 GRADIENT FOR STATE'
         molproKeys['numerical'] = False
 
+    if submitScript is not None:
+        molproKeys['submit_command'] = inputs['queue']
+
+
 elif inputs['code'] == 'molcas':
     if inputs['spe'] == 'casscf':
         pass
     elif inputs['spe'] == 'mrci':
         pass
     elif inputs['spe'] == 'caspt2':
+        pass
+
+    if submitScript is not None:
         pass
 
 
@@ -220,14 +324,14 @@ def run(gridPoint):
     if inputs['code'] == 'molpro':
 
         [workdirSPE, inputSPE] = molpro.setupSPE(inputs, geom, pwd, index)
-        [normalTermination, outputSPE] = util.runCalculation(molproKeys, pwd, workdirSPE, inputSPE, index)
+        [normalTermination, outputSPE] = util.runCalculation(molproKeys, pwd, workdirSPE, inputSPE, submissionScript, index)
         if normalTermination:
             data.energiesExtract(workdirSPE+outputSPE, inputs['spe'], molproKeys['energy_regex'],
                                   molproKeys['cas_prog'], index)
 
             if inputs['nacme'] == 'yes':
                 [nacmeWorkdir, nacmeInput, daxes] = molpro.nacmeSetup(inputs, geom, workdirSPE, index)
-                [nacmeNormalTermination, nacmeOutput] = util.runCalculation(molproKeys, pwd, nacmeWorkdir, nacmeInput, index)
+                [nacmeNormalTermination, nacmeOutput] = util.runCalculation(molproKeys, pwd, nacmeWorkdir, nacmeInput, submissionScript, index)
                 if nacmeNormalTermination:
                     data.nacmeExtract(nacmeWorkdir+nacmeOutput, molproKeys['nacme_regex'], index, daxes)
                 else:
@@ -235,7 +339,7 @@ def run(gridPoint):
 
             if inputs['grad'] == 'yes':
                 [gradWorkdir, gradInput] = molpro.gradientSetup(inputs, geom, workdirSPE, index)
-                [gradNormalTermination, gradOutput] = util.runCalculation(molproKeys, pwd, gradWorkdir, gradInput, index)
+                [gradNormalTermination, gradOutput] = util.runCalculation(molproKeys, pwd, gradWorkdir, gradInput, submissionScript, index)
                 if gradNormalTermination:
                     data.gradExtractMolpro(gradWorkdir+gradOutput, molproKeys['grad_regex'], molproKeys['numerical'], index)
                 else:
@@ -254,29 +358,19 @@ def run(gridPoint):
 
 
 if __name__ == "__main__":
-    try:
-        pwd = os.getcwd()  # parent dir for all calculations
-        f = open(inputGeom, 'r')
-        refGeom = np.genfromtxt(f, usecols=(1, 2, 3), encoding=None)
-        f.close()
-        listGeom = coordinateGenerator(refGeom)  # Generate coordinates
-
-        if inputs['code'] == 'molpro':  # All possible state couplings
-            couplings = molpro.stateCouplings(inputs['states'][-1])
-        elif inputs['code'] == 'molcas':
-            pass
-
-        pmanager = setup.ProccessManager()  # Force global mem sharing for ouput data
-        pmanager.start()
-        data = setup.datastore(refGeom, inputs['states'][-1], couplings, len(listGeom), pmanager)
-        runPool = multiprocessing.Pool()
-        runPool.map(run, [(k, v) for k, v in enumerate(listGeom)])
-
-        np.save('ENERGIES.npy', data.energies)  # Extract data
-        if inputs['nacme'] == 'yes':
-            np.save('NACMES.npy', data.nacmes)
-        if inputs['grad'] == 'yes':
-            np.save('GRADS.npy', data.grads)
-
-    except StopIteration:
-        print('Please ensure goemetry file is correct.')
+    pwd = os.getcwd()  # parent dir for all calculations
+    listGeom = coordinateGenerator(refGeom)  # Generate coordinates
+    if inputs['code'] == 'molpro':  # All possible state couplings
+        couplings = molpro.stateCouplings(inputs['states'][-1])
+    elif inputs['code'] == 'molcas':
+        pass
+    pmanager = setup.ProccessManager()  # Force global mem sharing for ouput data
+    pmanager.start()
+    data = setup.datastore(refGeom, inputs['states'][-1], couplings, len(listGeom), pmanager)
+    runPool = multiprocessing.Pool()
+    runPool.map(run, [(k, v) for k, v in enumerate(listGeom)])
+    np.save('ENERGIES.npy', data.energies)  # Extract data
+    if inputs['nacme'] == 'yes':
+        np.save('NACMES.npy', data.nacmes)
+    if inputs['grad'] == 'yes':
+        np.save('GRADS.npy', data.grads)

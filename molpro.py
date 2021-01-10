@@ -9,6 +9,13 @@ import numpy as np
     the CASSCF couplings/ gradients must be transformed using the CASPT2
     mixing matrix."""
 
+
+class FileTreeExistsError(Exception):
+    def __init__(self, directory, message='Delete, move or spawn new parent directory to run script from.'):
+        self.wdir = directory
+        self.message = message
+        super().__init__(self.message)
+
 #########################
 # INPUT FILE GENERATORS #
 #########################
@@ -19,9 +26,13 @@ def setupSPE(inputs: dict, geom, pwd: str, gp: int) -> str:
         Options - CASSCF/ MRCI/ CASPT2. Will project through active spaces provided
         sequentually. Multi-Referance methods are run using the last casscf projection.
         SOC matrix can be computed at the CASSCF or MRCI level. """
+    try:
+        workdir = '%s/GP%s/' % (pwd, gp)
+        os.mkdir(workdir)
+    except FileExistsError:
+        raise FileTreeExistsError(workdir)
+
     calculationSPE = []
-    workdir = '%s/GP%s/' % (pwd, gp)
-    os.mkdir(workdir)
     inputfile = 'SPE_GP%s.input' % gp
     #  Initialise SPE calculation for given geometry.
     initCalc = "***PES Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
@@ -69,11 +80,15 @@ def nacmeSetup(inputs: dict, refGeom, workdir: str, gp: int) -> (str, list):
        the molpro 3-point DDR procedure, one calculation at a referance geometry
        and two (positive & negative) at displaced geometries - done for each atom
        along each x, y and z axis."""
+    try:
+        nacmeWorkdir = '%s/NACMEs/' % workdir
+        os.mkdir(nacmeWorkdir)  # Setup dir for nacmes as subdir of grid point dir
+    except FileExistsError:
+        raise FileTreeExistsError(nacmeWorkdir)
+
     nacmeInput = []
     states = inputs['states'][-1]  # Only need final CAS projection for NACME.
-    nacmeWorkdir = '%s/NACMEs/' % workdir
     inputfile = "NACME_GP%s.input" % (gp)
-    os.mkdir(nacmeWorkdir)  # Setup dir for nacmes as subdir of grid point dir
     if inputs['nacme_level'] == 'casscf':  # If not MRCI, pass CAS wf to CI programme using noexc.
         noexc = True
     elif inputs['namcme_level'] == 'mrci':
@@ -161,11 +176,15 @@ def gradientSetup(inputs: dict, geom, workdir: str, gp: int):
        If a CASSCF or CASPT2 SPE energy calculation preceeds then analytical
        gradients are calculated using the rs2 programme. For MRCI numerical
        gradientds are used."""
+    try:
+        gradWorkdir = "%s/GRAD/" % workdir
+        os.mkdir(gradWorkdir)
+    except FileExistsError:
+        raise FileTreeExistsError(gradWorkdir)
+
     gradientCalculation = []
     states = inputs['states'][-1]
-    gradWorkdir = "%s/GRAD/" % workdir
     inputfile = "GRAD_GP%s.input" % gp
-    os.mkdir(gradWorkdir)
     initCalc = "***GRAD Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
     geometryBlock = geometrySetup(inputs, geom)
     gradientCalculation.extend([initCalc, '\n'.join(geometryBlock)])
@@ -196,6 +215,7 @@ def gradientSetup(inputs: dict, geom, workdir: str, gp: int):
     f.write('\n'.join(gradientCalculation))
     f.close()
     return gradWorkdir, inputfile
+
 
 ###########################
 # NACME SETUP UTILITIES #

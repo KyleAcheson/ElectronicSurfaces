@@ -1,6 +1,7 @@
 import subprocess
 import os
 import time
+import re
 
 """This module contains routines for both quantum codes which submit the jobs,
     check their status and also any additional utilities for formatting text. """
@@ -20,7 +21,7 @@ def getPID(inputfile: str) -> int:
     return pid
 
 
-def runCalculation(codeKeys: dict, pwd: str, workdir: str, inputfile: str, index: str) -> (bool, str):
+def runCalculation(codeKeys: dict, pwd: str, workdir: str, inputfile: str, submitScriptTemp: str, index: int) -> (bool, str):
     '''This function submits a single point energy and SO calculation at
         each point in the grid. Starting in the parent directory it opens the
         sub-directory at the grid point and submits the job, waiting until
@@ -28,8 +29,14 @@ def runCalculation(codeKeys: dict, pwd: str, workdir: str, inputfile: str, index
     index = "GP_"+str(index)
     outputfile = inputfile.split('.')[0]+'.out'
     os.chdir('%s' % (workdir))
-    subprocess.Popen(['%s %s &' % (codeKeys['submit_command'], inputfile)],
-                     shell=True, preexec_fn=os.setsid)  # Submit job
+
+    if submitScriptTemp is None:
+        subprocess.Popen(['%s %s &' % (codeKeys['submit_command'], inputfile)],
+                         shell=True, preexec_fn=os.setsid)  # Submit job
+    elif submitScriptTemp is not None:
+        submitScriptHPC = setupQueueHPC(submitScriptTemp, inputfile, index)
+        subprocess.Popen(['%s %s' % (codeKeys['submit_command'], submitScriptHPC)],
+                         shell=True, preexec_fn=os.setsid)
 
     pid = getPID(inputfile)
     time.sleep(1)
@@ -43,6 +50,16 @@ def runCalculation(codeKeys: dict, pwd: str, workdir: str, inputfile: str, index
     else:
         normalTermination = False
     return normalTermination, outputfile
+
+
+def setupQueueHPC(submitScript: str, inputfile: str, index: int):
+    subjobFile = "submit_GP%s.sh" % index
+    inputid = inputfile.split('.')[0]
+    submitScriptGP = re.sub(r'template', inputid, submitScript)
+    f = open(subjobFile, 'w+')
+    f.write(submitScriptGP)
+    f.close()
+    return subjobFile
 
 
 def insertGeom(start, refGeomBlock, geom, codeKeys):

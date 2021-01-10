@@ -1,7 +1,8 @@
 {
     "code": "molpro",
+    "queue" : "none",
     "mem": "5000,m",
-    "symm": "Y",
+    "symm": "y",
     "basis": "aug-cc-pvtz",
     "soc": "yes",
     "nacme": "yes",
