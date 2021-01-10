@@ -10,6 +10,8 @@ Ver2.0 - Splits state averaging of spin multiplicities.
 
 `./production_surfaces.py -inp input.json -g geom.xyz &`
 
+Running on a HPC queueing system: `./production_surfaces.py -inp input.json -g geom.xyz -q [template filename]` 
+
 For help: `./production_surfaces.py --help`
 
 OR `python3` without shebangs.
@@ -74,6 +76,6 @@ If a calculation fails, elements of the output arrays for that grid point are se
 
 - [ ] Routine to extract CASPT2 mixing matrix.
 
-- [ ] Add functionality to run on a HPC queuing system.
+- [x] Add functionality to run on a HPC queuing system.
 
 - [ ] Extend to Molcas - Framework already in place, just rewrite molpro.py in molcas format in molcas.py. 
