@@ -1,6 +1,6 @@
 {
     "code": "molpro",
-    "queue" : "none",
+    "hpc" : "local",
     "mem": "5000,m",
     "symm": "y",
     "basis": "aug-cc-pvtz",

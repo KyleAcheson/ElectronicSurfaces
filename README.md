@@ -4,7 +4,9 @@ Calculates potential energy surfaces for any tri-atomic molecule given a grid a 
 Can be run using no symmetry or with symmetry on - maximum symmetry is Cs. 
 Currently works for Molpro. 
 
-Ver2.0 - Splits state averaging of spin multiplicities.
+Runs on any local linux system or any HPC system running either Sun Grid Engine or PBS Pro queueing systems.
+
+Requires Python 3.5.2+ and Numpy.
 
 ### To run:
 
@@ -14,7 +16,7 @@ Running on a HPC queueing system: `./production_surfaces.py -inp input.json -g g
 
 For help: `./production_surfaces.py --help`
 
-OR `python3` without shebangs.
+OR `python` without shebangs.
 
 Ensure inputs are specified in Angstroms - programme will convert to bohr.
 

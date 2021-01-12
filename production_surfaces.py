@@ -20,7 +20,7 @@ parser.add_argument("-inp", dest="inputfile", required=True, type=str,
                     Input options in Json format\n
                     Required Input Specifications:\n
                     "code": molpro/molcas
-                    "queue" : submission command for running via HPC que, set none if not required
+                    "hpc" : HPC system - 'local', 'Sun Grid Engine' or 'PBS'
                     "mem": file memory
                     "symm": Symmetry generator (X, Y, Z) or  'nosymm' - max Cs symmetry
                     "basis": basis set in chosen programme format
@@ -42,11 +42,11 @@ parser.add_argument("-inp", dest="inputfile", required=True, type=str,
                     Can provide n lists (n = 1, 2, 3...) of orbitals and states
                     to project through active spaces at CASSCF level.
                     If a MR method is chosen, the MR calculation will corrospond
-                    to the last list of active space and states.\n
+                    to the last list of active spaces and states.\n
                     If running with  symmetry off, set the orbitals and states
                     that corrospond to Irrep2 to 0.\n
                     If running singlet or triplet states only, set the multiplicity
-                    you wish to ommit to 0.'''))
+                    you wish to ommit to 0.\n'''))
 parser.add_argument("-g", dest="inputGeomFile", required=True, type=str,
                     help="Geometry in xyz coordinates (ANGSTROM) at equalibrium.")
 parser.add_argument("-q", dest="scriptHPC", required=False, type=str,
@@ -80,7 +80,7 @@ except TypeError:
 ##################
 
 
-requiredInputs = ["code", "queue", "mem", "symm", "basis", "soc", "dr", "paxis",
+requiredInputs = ["code", "hpc", "mem", "symm", "basis", "soc", "dr", "paxis",
                   "nacme", "nacme_level", "grad", "spe", "nelec", "occ",
                   "atoms", "closed", "states", "singlets", "triplets"]
 
@@ -90,6 +90,7 @@ symmExcept = ['x', 'y', 'z', 'nosymm']
 nacmeExcept = ['casscf', 'mrci']
 paxisExcept = ['x', 'y', 'z']
 exceptSPE = ['casscf', 'mrci', 'caspt2']
+exceptHPC = ['local', 'Sun Grid Engine', 'PBS']
 
 inputError = ("ERROR: Missing required input fields from input.json.\n"
               "RUN: %s --help for a list of fields." % sys.argv[0])
@@ -116,8 +117,8 @@ for k in requiredInputs:
 
 if not isinstance(inputs['code'], str):
     raise ValueError("Error: '%s' must be type str" % inputs['code'])
-if not isinstance(inputs['queue'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['queue'])
+if not isinstance(inputs['hpc'], str):
+    raise ValueError("Error: '%s' must be type str" % inputs['hpc'])
 if not isinstance(inputs['mem'], str):
     raise ValueError("Error: '%s' must be type str" % inputs['mem'])
 if not isinstance(inputs['symm'], str):
@@ -164,6 +165,8 @@ inputs['dr'] = inputs['dr']*ang2au
 
 if inputs['code'] not in codeExcept:
     raise ValueError("Error: '%s' not available, choose from %s." % (inputs['code'], codeExcept))
+if inputs['hpc'] not in exceptHPC:
+    raise ValueError("Error: choose from %s." % exceptHPC)
 if inputs['symm'] not in symmExcept:
     raise ValueError("Error: choose from %s." % (symmExcept))
 if inputs['soc'] not in ynExcept:
@@ -234,10 +237,10 @@ for closedOrb in inputs['closed']:
 if refGeom.shape != (len(inputs['atoms']), 3):
     raise InputGeomError(refGeom)
 
-if submitScript is None and inputs['queue'] != 'none':
-    raise ValueError("Error: If not running via. a queueing system set queue input to none")
-elif submitScript is not None and inputs['queue'] == 'none':
-    raise ValueError("Error: If running via. a queueing system set queue input to the HPC submission command")
+if submitScript is None and inputs['hpc'] != 'local':
+    raise ValueError("Error: If not running via. a queueing system set hpc input to local")
+elif submitScript is not None and inputs['hpc'] == 'none':
+    raise ValueError("Error: If running via. a queueing system set hpc input to 'local', 'Sun Grid Engine' or 'PBS'")
 
 if submissionScript is not None and not re.search(r'template', submissionScript):
     raise ValueError("Error: Place the keyword 'template' where your input file goes in the HPC submission script")
@@ -278,9 +281,6 @@ if inputs['code'] == 'molpro':  # Set input dependent keys
         molproKeys['grad_regex'] = 'RSPT2 GRADIENT FOR STATE'
         molproKeys['numerical'] = False
 
-    if submitScript is not None:
-        molproKeys['submit_command'] = inputs['queue']
-
 
 elif inputs['code'] == 'molcas':
     if inputs['spe'] == 'casscf':
@@ -288,9 +288,6 @@ elif inputs['code'] == 'molcas':
     elif inputs['spe'] == 'mrci':
         pass
     elif inputs['spe'] == 'caspt2':
-        pass
-
-    if submitScript is not None:
         pass
 
 
@@ -324,14 +321,14 @@ def run(gridPoint):
     if inputs['code'] == 'molpro':
 
         [workdirSPE, inputSPE] = molpro.setupSPE(inputs, geom, pwd, index)
-        [normalTermination, outputSPE] = util.runCalculation(molproKeys, pwd, workdirSPE, inputSPE, submissionScript, index)
+        [normalTermination, outputSPE] = util.runCalculation(inputs['hpc'], molproKeys, pwd, workdirSPE, inputSPE, submissionScript, index)
         if normalTermination:
             data.energiesExtract(workdirSPE+outputSPE, inputs['spe'], molproKeys['energy_regex'],
                                   molproKeys['cas_prog'], index)
 
             if inputs['nacme'] == 'yes':
                 [nacmeWorkdir, nacmeInput, daxes] = molpro.nacmeSetup(inputs, geom, workdirSPE, index)
-                [nacmeNormalTermination, nacmeOutput] = util.runCalculation(molproKeys, pwd, nacmeWorkdir, nacmeInput, submissionScript, index)
+                [nacmeNormalTermination, nacmeOutput] = util.runCalculation(inputs['hpc'], molproKeys, pwd, nacmeWorkdir, nacmeInput, submissionScript, index)
                 if nacmeNormalTermination:
                     data.nacmeExtract(nacmeWorkdir+nacmeOutput, molproKeys['nacme_regex'], index, daxes)
                 else:
@@ -339,7 +336,7 @@ def run(gridPoint):
 
             if inputs['grad'] == 'yes':
                 [gradWorkdir, gradInput] = molpro.gradientSetup(inputs, geom, workdirSPE, index)
-                [gradNormalTermination, gradOutput] = util.runCalculation(molproKeys, pwd, gradWorkdir, gradInput, submissionScript, index)
+                [gradNormalTermination, gradOutput] = util.runCalculation(inputs['hpc'], molproKeys, pwd, gradWorkdir, gradInput, submissionScript, index)
                 if gradNormalTermination:
                     data.gradExtractMolpro(gradWorkdir+gradOutput, molproKeys['grad_regex'], molproKeys['numerical'], index)
                 else:
