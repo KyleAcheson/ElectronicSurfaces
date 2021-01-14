@@ -14,6 +14,7 @@ flatten = lambda nestedList: [item for sublist in nestedList for item in sublist
 
 
 class ProccessManager(multiprocessing.managers.BaseManager):
+    ''' Custom subclass of BaseManager to share objects between processes. '''
     pass
 
 

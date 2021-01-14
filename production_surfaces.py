@@ -364,8 +364,11 @@ if __name__ == "__main__":
     pmanager = setup.ProccessManager()  # Force global mem sharing for ouput data
     pmanager.start()
     data = setup.datastore(refGeom, inputs['states'][-1], couplings, len(listGeom), pmanager)
-    runPool = multiprocessing.Pool()
-    runPool.map(run, [(k, v) for k, v in enumerate(listGeom)])
+    cpus = multiprocessing.cpu_count()-2
+    pool = multiprocessing.Pool(processes=cpus)
+    pool.map_async(run, [(k, v) for k, v in enumerate(listGeom)])
+    pool.close()
+    pool.join()
     np.save('ENERGIES.npy', data.energies)  # Extract data
     if inputs['nacme'] == 'yes':
         np.save('NACMES.npy', data.nacmes)

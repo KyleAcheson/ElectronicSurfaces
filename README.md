@@ -10,13 +10,11 @@ Requires Python 3.5.2+ and Numpy.
 
 ### To run:
 
-`./production_surfaces.py -inp input.json -g geom.xyz &`
+`python production_surfaces.py -inp input.json -g geom.xyz &`
 
 Running on a HPC queueing system: `./production_surfaces.py -inp input.json -g geom.xyz -q [template filename]` 
 
 For help: `./production_surfaces.py --help`
-
-OR `python` without shebangs.
 
 Ensure inputs are specified in Angstroms - programme will convert to bohr.
 
@@ -74,7 +72,7 @@ If a calculation fails, elements of the output arrays for that grid point are se
 
 - [ ] Routine to extract SOC.
 
-- [ ] Internal coordinate routine for spherical coordinates. Option to use this or feed a predefined list of arrays to the programme.
+- [ ] Internal coordinate routine.
 
 - [ ] Routine to extract CASPT2 mixing matrix.
 
