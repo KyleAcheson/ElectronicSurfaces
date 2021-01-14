@@ -24,7 +24,7 @@ def runCalculation(system: str, codeKeys: dict, pwd: str, workdir: str, inputfil
 
     terminationCode = calculationTermination(codeKeys, outputfile)  #  check normal termination
     os.chdir(pwd)
-    return terminationCode
+    return terminationCode, outputfile
 
 
 def calculationTermination(codeKeys, outputfile):
