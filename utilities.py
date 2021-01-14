@@ -16,10 +16,10 @@ def runCalculation(system: str, codeKeys: dict, pwd: str, workdir: str, inputfil
 
     if system == 'local':  #  Run calculation and wait for termination in each case
         runLocal(codeKeys, inputfile)
-    elif system == 'Sun Grid Engine':
+    elif system == 'sun grid engine':
         gridEngineScript = setup_submit_script(submitscript, inputfile, index)
         qsub(gridEngineScript)
-    elif system == 'PBS':
+    elif system == 'pbs':
         pass
 
     terminationCode = calculationTermination(codeKeys, outputfile)  #  check normal termination
