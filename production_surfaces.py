@@ -298,7 +298,7 @@ elif inputs['code'] == 'molcas':
 
 def coordinateGenerator(refGeom):
     listGeom = []
-    for i in np.arange(1.60, 2.1, 0.1):
+    for i in np.arange(2.30, 3.1, 0.1):
         new_geom = refGeom.copy()
         new_geom[1, 2] = i
         new_geom = new_geom*ang2au

@@ -155,7 +155,7 @@ def nacmeDisplacedSetup(inputs, geom, wfsRef, tdmsRef, dwfs, dtdms, orbitals, ca
         dtdm = dtdms[i]
         dorbital = orbitals[i]
         geomDisplaced = geometrySetup(inputs, geom[i, :, :])
-        dcasscf = re.sub(r'orbital,2140.2', 'orbital,%s' % dorbital, casscf)  # displaced casscf
+        dcasscf = re.sub(r'orbital,2140.2', 'orbital,%s\ndiab,2140.2' % dorbital, casscf)  # displaced casscf
         displacedCalculation.extend(['\n', '\n'.join(geomDisplaced), dcasscf, '\n'])
         dciwf = mrciSetup(inputs, dwf[0], dtdm[0], noexc, tdm=False)  # displaced CI
         displacedCalculation.extend(['\n'.join(dciwf), '\n'])
