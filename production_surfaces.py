@@ -7,6 +7,7 @@ import numpy as np
 import argparse
 import textwrap
 import json
+import scipy.io as sio
 import setup
 import utilities as util
 import molpro
@@ -48,7 +49,11 @@ parser.add_argument("-inp", dest="inputfile", required=True, type=str,
                     If running singlet or triplet states only, set the multiplicity
                     you wish to ommit to 0.\n'''))
 parser.add_argument("-g", dest="inputGeomFile", required=True, type=str,
-                    help="Geometry in xyz coordinates (ANGSTROM) at equalibrium.")
+                    help=textwrap.dedent('''\
+                    Nd Array of Geometry in xyz coordinates (ANGSTROM) over all space\n
+                    Must be of type .mat or .npy\n
+                    Must have dimensions (Natom, 3, Ngrid DoF1, Ngrid DoF2, ..., Ngrid DoFN)\n
+                    Degrees of freedom will be flattened from left to right to give a list of geometries\n'''))
 parser.add_argument("-q", dest="scriptHPC", required=False, type=str,
                     help="Submission script template for running on a HPC queueing system.")
 
@@ -62,9 +67,20 @@ f = open(inp, 'r')
 inputs = json.load(f)
 f.close()
 
-f = open(inputGeom, 'r')
-refGeom = np.genfromtxt(f, usecols=(1, 2, 3), encoding=None)
-f.close()
+fileType = inputGeom.split('.')[-1]
+if fileType == 'npy':
+    refGeom = np.load(inputGeom)
+elif fileType == 'mat':
+    refMat = sio.loadmat(inputGeom)
+    keys = [k for k in refMat if '__' not in refMat]
+    if len(keys) > 1:
+        raise TypeError('.Mat file must have only one variable')
+    else:
+        keyval = keys[0]
+    refGeom = refMat[keyval]
+else:
+    raise TypeError('Input goemetry file must be .npy or .mat')
+
 
 try:
     f = open(submitScript, 'r')
@@ -97,7 +113,8 @@ inputError = ("ERROR: Missing required input fields from input.json.\n"
 
 
 class InputGeomError(Exception):
-    def __init__(self, geom, message='Number of user specified atoms does not match input geometry in xyz format'):
+    def __init__(self, geom, message='''Input geometry array has incorrect dimensions
+                                       or does not match number of user specified atoms'''):
         self.geom = geom
         self.message = message
         super().__init__(self.message)
@@ -234,9 +251,8 @@ for closedOrb in inputs['closed']:
 
 # Ensure input geometry and HPC queue submission script is correct
 
-if refGeom.shape != (len(inputs['atoms']), 3):
+if refGeom.shape[0:2] != (len(inputs['atoms']), 3):
     raise InputGeomError(refGeom)
-
 if submitScript is None and inputs['hpc'] != 'local':
     raise ValueError("Error: If not running via. a queueing system set hpc input to local")
 elif submitScript is not None and inputs['hpc'] == 'none':
@@ -296,15 +312,25 @@ elif inputs['code'] == 'molcas':
 ############################
 
 
-def coordinateGenerator(refGeom):
-    listGeom = []
-    for i in np.arange(2.30, 3.1, 0.1):
-        new_geom = refGeom.copy()
-        new_geom[1, 2] = i
-        new_geom = new_geom*ang2au
-        listGeom.append(new_geom)
-    return listGeom
+#def coordinateGenerator(refGeom):
+#    listGeom = []
+#    for i in np.arange(1.40, 1.85, 0.05):
+#        new_geom = refGeom.copy()
+#        new_geom[1, 2] = i
+#        new_geom = new_geom*ang2au
+#        listGeom.append(new_geom)
+#    return listGeom
 
+
+def coordinateReader(GeomIn):
+    GeomArr = GeomIn*ang2au
+    listGeom = []
+    dims = GeomArr.shape[2:]
+    ngrid = np.product(dims)
+    GeomFlat = GeomArr.reshape(len(inputs['atoms']), 3, ngrid)
+    for i in range(ngrid):
+        listGeom.append(GeomFlat[:, :, i])
+    return listGeom
 
 ##################################
 # MAIN - Run surface calculation #
@@ -325,6 +351,8 @@ def run(gridPoint):
         if normalTermination:
             data.energiesExtract(workdirSPE+outputSPE, inputs['spe'], molproKeys['energy_regex'],
                                   molproKeys['cas_prog'], index)
+            if inputs['soc'] == 'yes':
+                data.extractSOC(workdirSPE+outputSPE, index)
 
             if inputs['nacme'] == 'yes':
                 [nacmeWorkdir, nacmeInput, daxes] = molpro.nacmeSetup(inputs, geom, workdirSPE, index)
@@ -348,6 +376,8 @@ def run(gridPoint):
                 data.nacmes[:, :, :, index] = 'NaN'
             if inputs['grad'] == 'yes':
                 data.grads[:, :, :, index] = 'NaN'
+            if inputs['soc'] == 'yes':
+                data.socs[:, :, :, index] = 'NaN'
 
 
     elif inputs['code'] == 'molcas':   # TO DO
@@ -356,7 +386,7 @@ def run(gridPoint):
 
 if __name__ == "__main__":
     pwd = os.getcwd()  # parent dir for all calculations
-    listGeom = coordinateGenerator(refGeom)  # Generate coordinates
+    listGeom = coordinateReader(refGeom)
     if inputs['code'] == 'molpro':  # All possible state couplings
         couplings = molpro.stateCouplings(inputs['states'][-1])
     elif inputs['code'] == 'molcas':
@@ -364,7 +394,7 @@ if __name__ == "__main__":
     pmanager = setup.ProccessManager()  # Force global mem sharing for ouput data
     pmanager.start()
     data = setup.datastore(refGeom, inputs['states'][-1], couplings, len(listGeom), pmanager)
-    cpus = multiprocessing.cpu_count()-2
+    cpus = int((multiprocessing.cpu_count())/2)
     pool = multiprocessing.Pool(processes=cpus)
     pool.map_async(run, [(k, v) for k, v in enumerate(listGeom)])
     pool.close()
@@ -374,3 +404,5 @@ if __name__ == "__main__":
         np.save('NACMES.npy', data.nacmes)
     if inputs['grad'] == 'yes':
         np.save('GRADS.npy', data.grads)
+    if inputs['soc'] == 'yes':
+        np.save('SOCS.npy', data.socs)

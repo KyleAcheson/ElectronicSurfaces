@@ -70,9 +70,9 @@ If a calculation fails, elements of the output arrays for that grid point are se
 
 - [x] Parallel execution - Must force sharing of array memory for global data storage.
 
-- [ ] Routine to extract SOC.
+- [x] Routine to extract SOC.
 
-- [ ] Internal coordinate routine.
+- [ ] Caclulations in CSF basis.
 
 - [ ] Routine to extract CASPT2 mixing matrix.
 
