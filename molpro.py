@@ -31,6 +31,8 @@ def setupSPE(inputs: dict, geom, pwd: str, gp: int) -> str:
         os.mkdir(workdir)
     except FileExistsError:
         raise FileTreeExistsError(workdir)
+    except:
+        raise OSError('Can not create SPE directory')
 
     calculationSPE = []
     inputfile = 'SPE_GP%s.input' % gp
@@ -41,7 +43,7 @@ def setupSPE(inputs: dict, geom, pwd: str, gp: int) -> str:
     calculationSPE.extend([initCalc, geometryBlock])
 
     #  Set up chosen electronic structure theory
-    casscf = casscfSetup(inputs, nacme=False, splitSpin=False)
+    casscf = casscfSetup(inputs, nacme=False)
     casscf = '\n'.join(casscf)
     if inputs['spe'] == 'casscf':
         calculationSPE.append(casscf)
@@ -85,24 +87,54 @@ def nacmeSetup(inputs: dict, refGeom, workdir: str, gp: int) -> (str, list):
         os.mkdir(nacmeWorkdir)  # Setup dir for nacmes as subdir of grid point dir
     except FileExistsError:
         raise FileTreeExistsError(nacmeWorkdir)
+    except:
+        raise OSError('Can not create NACME directory.')
 
     nacmeInput = []
     states = inputs['states'][-1]  # Only need final CAS projection for NACME.
     inputfile = "NACME_GP%s.input" % (gp)
+
     if inputs['nacme_level'] == 'casscf':  # If not MRCI, pass CAS wf to CI programme using noexc.
         noexc = True
     elif inputs['namcme_level'] == 'mrci':
         noexc = False
+
     [nacmeRef, wfsRef, tdmsRef] = nacmeReferanceSetup(inputs, refGeom, noexc)
-
+    nacmeInput.append('\n'.join(nacmeRef))
     # Initialise displaced geoms to be used in following calculation
-    casscf = casscfSetup(inputs, nacme=True, splitSpin=False)
+    casscf = casscfSetup(inputs, nacme=True)
     casscfIndexs = [ind for ind, line in enumerate(casscf) if 'casscf' in line]
-    casscf = casscf[casscfIndexs[-1]:]  # For displaced calc - only need final CAS projection
-    casscf = '\n'.join(casscf)
-    [nd, dx, dy, dz] = displace(inputs['symm'], len(inputs['atoms']), inputs['dr'], refGeom)
-    [orbitals, dwfs, dtdms] = recordIncrementer(2140.2, wfsRef, tdmsRef, nd, np.count_nonzero(states))
+    if inputs['singlets'] == 'yes' and inputs['triplets'] == 'yes':
+        singletStates = states[0:2]
+        singletStates.extend([0, 0])  # Must pad
+        tripletStates = [0, 0]
+        tripletStates.extend(states[2:])
+        [wfRefSinglet, wfRefTriplet] = SplitMidPoint(wfsRef) # Split ref records for spins in two
+        [tdmsRefSinglet, tdmsRefTriplet] = SplitMidPoint(tdmsRef)
+        casscf_S = '\n'.join(casscf[casscfIndexs[-2]: casscfIndexs[-1]]) # Last singlet casscf block
+        [nacmeSinglet, daxis] = nacmePerSpin(inputs, casscf_S, singletStates, 2140.2, refGeom, wfRefSinglet, tdmsRefSinglet, noexc) #  nacme for singlet
+        casscf_T = '\n'.join(casscf[casscfIndexs[-1]:]) # Last triplet casscf block
+        [nacmeTriplet, daxis] = nacmePerSpin(inputs, casscf_T, tripletStates, 2141.2, refGeom, wfRefTriplet, tdmsRefTriplet, noexc)  # nacme for triplet
+        nacmeInput.extend(['\n'.join(nacmeSinglet), '\n'.join(nacmeTriplet)])
+    elif inputs['singlets'] == 'yes' and inputs['triplets'] == 'no':
+        casscf_S = '\n'.join(casscf[casscfIndexs[-1]:])  # Only need last casscf
+        nacmeSinglet = nacmePerSpin(casscf_S, states[0:2], 2140.2, refGeom, wfsRef, tdmsRef, noexc)
+        nacmeInput.extend([nacmeSinglet])
+    elif inputs['singlets'] == 'no' and inputs['triplets'] == 'yes':
+        casscf_T = '\n'.join(casscf[casscfIndexs[-1]:]) # Again last corrospond to triplet here
+        nacmeTriplet = nacmePerSpin(casscf_T, states[2:], 2141.2, refGeom, wfsRef, tdmsRef, noexc)
+        nacmeInput.extend([nacmeTriplet])
 
+    f = open(nacmeWorkdir+inputfile, 'w+')
+    f.write('\n'.join(nacmeInput))
+    f.close()
+    return nacmeWorkdir, inputfile, daxis  # daxis needed for nacme extraction
+
+
+def nacmePerSpin(inputs: dict, casscf: str, states: list, initOrb: float, refGeom: list, wfsRef: list, tdmsRef: list, noexc: bool):
+    nacmeInput = []
+    [nd, dx, dy, dz] = displace(inputs['symm'], len(inputs['atoms']), inputs['dr'], refGeom)
+    [orbitals, dwfs, dtdms] = recordIncrementer(initOrb, wfsRef, tdmsRef, nd, np.count_nonzero(states))
     # Generate displaced calculations in each x, y, z coord
     if dx is not None:
         dx = nacmeDisplacedSetup(inputs, dx, wfsRef, tdmsRef, dwfs, dtdms, orbitals, casscf, noexc, states, nd)
@@ -112,15 +144,12 @@ def nacmeSetup(inputs: dict, refGeom, workdir: str, gp: int) -> (str, list):
         dz = nacmeDisplacedSetup(inputs, dz, wfsRef, tdmsRef, dwfs, dtdms, orbitals, casscf, noexc, states, nd)
     daxis = [True if dnacme is not None else False for dnacme in (dx, dy, dz)]
     dnacmes = ['\n'.join(dnacme) for dnacme in (dx, dy, dz) if dnacme is not None]
-    nacmeInput.extend(['\n'.join(nacmeRef), '\n'.join(dnacmes)])
-
-    f = open(nacmeWorkdir+inputfile, 'w+')
-    f.write('\n'.join(nacmeInput))
-    f.close()
-    return nacmeWorkdir, inputfile, daxis
+    nacmeInput.append('\n'.join(dnacmes))
+    return nacmeInput, daxis
 
 
 def nacmeReferanceSetup(inputs: dict, refGeom, noexc: bool) -> (list, list, list):
+    # Need to modify to split into spin multis
     """Procedure for setting up referance calculation to be used in
        NACME calculation. The referance calculation must project through all
        user specified active spaces."""
@@ -129,10 +158,10 @@ def nacmeReferanceSetup(inputs: dict, refGeom, noexc: bool) -> (list, list, list
     nacmeRef = []
     initCalc = "***NACME Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
     geometryBlock = geometrySetup(inputs, refGeom)
-    casscf = casscfSetup(inputs, nacme=False, splitSpin=False)
+    casscf = casscfSetup(inputs, nacme=False)
     nacmeRef.extend([initCalc, '\n'.join(geometryBlock), '\n'.join(casscf), '\n'])
     # Set up following CI calculation for reference - do tdm calculation
-    ciwf = mrciSetup(inputs, 6000.2, 8000.2, noexc, tdm=True)
+    ciwf = mrciSetup(inputs, inputs['states'][-1],  6000.2, 8000.2, noexc, tdm=True)
     ciwf = '\n'.join(ciwf)
     nacmeRef.append(ciwf)
     wfsRef = re.findall(r"6[0-9]{3}\.2", ciwf)   # Get list of reference wf
@@ -157,7 +186,7 @@ def nacmeDisplacedSetup(inputs, geom, wfsRef, tdmsRef, dwfs, dtdms, orbitals, ca
         geomDisplaced = geometrySetup(inputs, geom[i, :, :])
         dcasscf = re.sub(r'orbital,2140.2', 'orbital,%s\ndiab,2140.2' % dorbital, casscf)  # displaced casscf
         displacedCalculation.extend(['\n', '\n'.join(geomDisplaced), dcasscf, '\n'])
-        dciwf = mrciSetup(inputs, dwf[0], dtdm[0], noexc, tdm=False)  # displaced CI
+        dciwf = mrciSetup(inputs, states, dwf[0], dtdm[0], noexc, tdm=False)  # displaced CI
         displacedCalculation.extend(['\n'.join(dciwf), '\n'])
         citdm = citdmSetup(wfsRef, dwf, dtdm, np.count_nonzero(states))  # Overlap of displaced w/ reference
         displacedCalculation.extend(['\n'.join(citdm), '\n'])
@@ -181,6 +210,8 @@ def gradientSetup(inputs: dict, geom, workdir: str, gp: int):
         os.mkdir(gradWorkdir)
     except FileExistsError:
         raise FileTreeExistsError(gradWorkdir)
+    except:
+        raise OSError('Can not create GRAD directory')
 
     gradientCalculation = []
     states = inputs['states'][-1]
@@ -192,7 +223,7 @@ def gradientSetup(inputs: dict, geom, workdir: str, gp: int):
         if inputs['singlets'] and inputs['triplets'] == 'yes':
             nSinglets = sum(states[:2])
             nTriplets = sum(states[2:])
-            casscf = casscfSetup(inputs, nacme=False, splitSpin=True)
+            casscf = casscfSetup(inputs, nacme=False)
             casscfIndex = [ind for ind, line in enumerate(casscf) if 'casscf' in line]
             casscfInit = casscf[:casscfIndex[-2]]
             casscfSinglet = casscf[casscfIndex[-2]:casscfIndex[-1]]
@@ -204,7 +235,7 @@ def gradientSetup(inputs: dict, geom, workdir: str, gp: int):
                                         '\n'.join(singletGradients), '\n'.join(casscfTriplet),
                                         '\n'.join(tripletGradients)])
         else:
-            casscf = casscfSetup(inputs, nacme=False, splitSpin=False)
+            casscf = casscfSetup(inputs, nacme=False)
             gradients = caspt2Setup(inputs, grad=True)
             gradientCalculation.extend(['\n'.join(casscf), '\n'.join(gradients)])
 
@@ -347,14 +378,14 @@ def geometrySetup(inputs: dict, geom) -> list:
     return geometryBlock
 
 
-def casscfSetup(inputs: dict, nacme: bool, splitSpin: bool) -> list:
+def casscfSetup(inputs: dict, nacme: bool) -> list:
     """Sets up N single point calculations at the CASSCF level given N active spaces
     and states. Works for any combination of symmetry and multiplicities."""
     casscfBlock = []
     if not nacme:
-        startwf = ''
+        startwf_S, startwf_T = '', ''
     if nacme:
-        startwf = '\nstart,2140.2'
+        startwf_S, startwf_T = '\nstart,2140.2', '\nstart,2141.2'
     casscfBlock.append('{hf}')
 
     if inputs['symm'] != 'nosymm':
@@ -362,57 +393,49 @@ def casscfSetup(inputs: dict, nacme: bool, splitSpin: bool) -> list:
             occ = inputs['occ'][i]
             closed = inputs['closed'][i]        # Init active spaces and num. states
             states = inputs['states'][i]        # for each projection
-            casscf = "{casscf\nfrozen,0\nclosed,%s,%s\nocc,%s,%s%s\norbital,2140.2" % (closed[0], closed[1], occ[0], occ[1], startwf)
-            casscfBlock.append(casscf)
+            casscf_S = "{casscf\nfrozen,0\nclosed,%s,%s\nocc,%s,%s%s\norbital,2140.2\nconfig,csf" % (
+                        closed[0], closed[1], occ[0], occ[1], startwf_S)
+            casscf_T = "{casscf\nfrozen,0\nclosed,%s,%s\nocc,%s,%s%s\norbital,2141.2\nconfig,csf" % (
+                        closed[0], closed[1], occ[0], occ[1], startwf_T)
             if inputs['singlets'] == 'yes' and inputs['triplets'] == 'yes':
                 wf1 = "wf,%s,1,0\nstate,%s" % (inputs['nelec'], states[0])  # Init wf depending on states
-                wf2 = "wf,%s,2,0\nstate,%s" % (inputs['nelec'], states[1])
+                wf2 = "wf,%s,2,0\nstate,%s\n};" % (inputs['nelec'], states[1])
                 wf3 = "wf,%s,1,2\nstate,%s" % (inputs['nelec'], states[2])
                 wf4 = "wf,%s,2,2\nstate,%s\n};" % (inputs['nelec'], states[3])
-                if splitSpin:  # For analytical gradient calculations
-                    casscfBlock.extend([wf1, wf2+'};', casscf, wf3, wf4])  # can not SA over diff spin states here
-                else:
-                    casscfBlock.extend([wf1, wf2, wf3, wf4])  # Do SA over different spins
+                casscfBlock.extend([casscf_S, wf1, wf2, casscf_T, wf3, wf4])  # Do SA over different spins
             elif inputs['singlets'] == 'yes' and inputs['triplets'] == 'no':
                 wf1 = "wf,%s,1,0\nstate,%s" % (inputs['nelec'], states[0])
                 wf2 = "wf,%s,2,0\nstate,%s\n};" % (inputs['nelec'], states[1])
-                wf3 = ""
-                wf4 = ""
-                casscfBlock.extend([wf1, wf2, wf3, wf4])
+                casscfBlock.extend([casscf_S, wf1, wf2])
             elif inputs['singlets'] == 'no' and inputs['triplets'] == 'yes':
-                wf1 = ""
-                wf2 = ""
                 wf3 = "wf,%s,1,2\nstate,%s" % (inputs['nelec'], states[2])
                 wf4 = "wf,%s,2,2\nstate,%s\n};" % (inputs['nelec'], states[3])
-                casscfBlock.extend([wf1, wf2, wf3, wf4])
+                casscfBlock.extend([casscf_T, wf3, wf4])
 
     elif inputs['symm'] == 'nosymm':
         for i in range(len(states)):
             occ = inputs['occ'][i]
             closed = inputs['closed'][i]
             states = inputs['states'][i]
-            casscf = "{casscf\nfrozen,0\nclosed,%s\nocc,%s%s\norbital,2140.2" % (closed[0], occ[0], startwf)
-            casscfBlock.append(casscf)
+            casscf_S = "{casscf\nfrozen,0\nclosed,%s\nocc,%s%s\norbital,2140.2\nconfig,csf" % (
+                      closed[0], occ[0], startwf_S)
+            casscf_T = "{casscf\nfrozen,0\nclosed,%s\nocc,%s%s\norbital,2141.2\nconfig,csf" % (
+                      closed[0], occ[0], startwf_T)
             if inputs['singlets'] == 'yes' and inputs['triplets'] == 'yes':
-                wf1 = "wf,%s,1,0\nstate,%s" % (inputs['nelec'], states[0])  # Only one irrep for each spin
+                wf1 = "wf,%s,1,0\nstate,%s};" % (inputs['nelec'], states[0])  # Only one irrep for each spin
                 wf2 = "wf,%s,1,2\nstate,%s};" % (inputs['nelec'], states[2])  # if no symm is chosen
-                if splitSpin:  # do not SA over different spin multiplicities
-                    casscfBlock.extend([wf1+'};', casscf, wf2])
-                else:
-                    casscfBlock.extend([wf1, wf2])
+                casscfBlock.extend([casscf_S, wf1, casscf_T, wf2])
             elif inputs['singlets'] == 'yes' and inputs['triplets'] == 'no':
                 wf1 = "wf,%s,1,0\nstate,%s};" % (inputs['nelec'], states[0])
-                wf2 = ""
-                casscfBlock.extend([wf1, wf2])
+                casscfBlock.extend([casscf_S, wf1])
             elif inputs['singlets'] == 'no' and inputs['triplets'] == 'yes':
-                wf1 = ""
                 wf2 = "wf,%s,1,2\nstate,%s};" % (inputs['nelec'], states[2])
-                casscfBlock.extend([wf1, wf2])
+                casscfBlock.extend([casscf_T, wf2])
 
     return casscfBlock
 
 
-def mrciSetup(inputs: dict, orbitalRecord: float, tdmRecord: float, noexc: bool, tdm: bool) -> list:
+def mrciSetup(inputs: dict, states: list,  orbitalRecord: float, tdmRecord: float, noexc: bool, tdm: bool) -> list:
     """Sets up an MRCI calculation (based on final CASSCF projection)
        for each symmetry/ multiplicity provided. No excitations (noexc) input
        bool allows to setup actual MRCI calculation or just to pass a CASSCF wf
@@ -420,7 +443,6 @@ def mrciSetup(inputs: dict, orbitalRecord: float, tdmRecord: float, noexc: bool,
        Transition dipole moment (tdm) bool allows subsequent calculation and
        storage of the tdm for each state."""
     mrciBlock = []
-    states = inputs['states'][-1]  # Only need final CAS projections states
     wfs = ["wf,%s,1,0" % inputs['nelec'], "wf,%s,2,0" % inputs['nelec'],
            "wf,%s,1,2" % inputs['nelec'], "wf,%s,2,2" % inputs['nelec']]  # wfs corrosponding to list of states
 
@@ -483,3 +505,10 @@ def splitList(alist, chunks):
         newList.append(alist[i:i+chunks])
 
     return newList
+
+
+def SplitMidPoint(array):
+    """Splits a list or array into two around the mid-point."""
+    n = len(array)
+    half_n = int(n/2)
+    return array[:half_n], array[n-half_n:]

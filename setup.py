@@ -31,11 +31,15 @@ class datastore:
         self.refGeom = refGeom
         self.ngrid = ngrid
         self.Natm = len(self.refGeom)
+        self.nsinglets = sum(states[0:2])
+        self.ntriplets = sum(states[2:4])
+        self.nmultiplets = self.nsinglets + (3*self.ntriplets)
         self.nstates = sum(states)
         self.energies = pmanager.np_zeros((ngrid, self.nstates))
         self.couplings = flatten(couplings)
         self.nacmes = pmanager.np_zeros((self.Natm, 3, len(self.couplings), self.ngrid))
         self.grads = pmanager.np_zeros((self.Natm, 3, self.nstates, self.ngrid))
+        self.socs = pmanager.np_zeros((self.nmultiplets, self.nmultiplets, 2, self.ngrid))
 
     def energiesExtract(self, outfile: str, programme: str, progregex: str, multi: str, gp: int):
         """Extracts energies from a single point calculation at each grid point.
@@ -89,8 +93,29 @@ class datastore:
             gradArray = np.genfromtxt(StringIO(gradMatrixStr), usecols=(1, 2, 3), encoding=None)
             self.grads[:, :, x, gp] = gradArray
 
-    def extractSOC():
-        pass
+    def extractSOC(self, outfile: str, gp: int):
+        TempSOC = np.zeros((self.nmultiplets, self.nmultiplets, 2))
+        f = open(outfile, 'r')
+        lines = f.readlines()
+        f.close()
+        idx = [i for i, line in enumerate(lines) if 'Nr  State  S   SZ' in line]
+        StateBlock = [int(lines[i].split()[-1]) for i in idx]
+        LastIdx = idx[-1]+((self.nmultiplets*2)+(self.nmultiplets+2))
+        idx.append(LastIdx)
+        StateBlock.insert(0, 0)
+        for j in range(len(idx[0:-1])):
+            MatrixBlockRaw = lines[idx[j]+1:idx[j+1]]
+            MatrixBlockRaw = [line.strip() for line in MatrixBlockRaw]
+            MatrixBlock = list(filter(None, MatrixBlockRaw))
+            RealValuedRaw = [line for i, line in enumerate(MatrixBlock) if i % 2 == 0]
+            RealValued = [' '.join(line.split()[4:]) for line in RealValuedRaw]
+            ImagValued = [line for i, line in enumerate(MatrixBlock) if i % 2 != 0]
+            SOCTempReal = np.genfromtxt(StringIO('\n'.join(RealValued)), encoding=None)
+            SOCTempImag = np.genfromtxt(StringIO('\n'.join(ImagValued)), encoding=None)
+            TempSOC[:, StateBlock[j]:StateBlock[j+1], 0] = SOCTempReal
+            TempSOC[:, StateBlock[j]:StateBlock[j+1], 1] = SOCTempImag
+
+        self.socs[:, :, :, gp] = TempSOC
 
     def caspt2MatrixExtract():
         pass

@@ -72,7 +72,7 @@ if fileType == 'npy':
     refGeom = np.load(inputGeom)
 elif fileType == 'mat':
     refMat = sio.loadmat(inputGeom)
-    keys = [k for k in refMat if '__' not in refMat]
+    keys = [k for k in refMat if '__' not in k]
     if len(keys) > 1:
         raise TypeError('.Mat file must have only one variable')
     else:
@@ -133,43 +133,43 @@ for k in requiredInputs:
 # Check input params have correct data type
 
 if not isinstance(inputs['code'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['code'])
+    raise ValueError(" '%s' must be type str" % inputs['code'])
 if not isinstance(inputs['hpc'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['hpc'])
+    raise ValueError(" '%s' must be type str" % inputs['hpc'])
 if not isinstance(inputs['mem'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['mem'])
+    raise ValueError(" '%s' must be type str" % inputs['mem'])
 if not isinstance(inputs['symm'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['symm'])
+    raise ValueError(" '%s' must be type str" % inputs['symm'])
 if not isinstance(inputs['singlets'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['singlets'])
+    raise ValueError(" '%s' must be type str" % inputs['singlets'])
 if not isinstance(inputs['triplets'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['triplets'])
+    raise ValueError(" '%s' must be type str" % inputs['triplets'])
 if not isinstance(inputs['basis'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['basis'])
+    raise ValueError(" '%s' must be type str" % inputs['basis'])
 if not isinstance(inputs['soc'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['soc'])
+    raise ValueError(" '%s' must be type str" % inputs['soc'])
 if not isinstance(inputs['nacme'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['nacme'])
+    raise ValueError(" '%s' must be type str" % inputs['nacme'])
 if not isinstance(inputs['nacme_level'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['nacme_level'])
+    raise ValueError(" '%s' must be type str" % inputs['nacme_level'])
 if not isinstance(inputs['grad'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['grad'])
+    raise ValueError(" '%s' must be type str" % inputs['grad'])
 if not isinstance(inputs['spe'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['spe'])
+    raise ValueError(" '%s' must be type str" % inputs['spe'])
 if not isinstance(inputs['paxis'], str):
-    raise ValueError("Error: '%s' must be type str" % inputs['paxis'])
+    raise ValueError(" '%s' must be type str" % inputs['paxis'])
 if not isinstance(inputs['atoms'], list):
-    raise ValueError("Error: '%s' must be type list of str" % inputs['atoms'])
+    raise ValueError(" '%s' must be type list of str" % inputs['atoms'])
 if not isinstance(inputs['nelec'], int):
-    raise ValueError("Error: '%s' must be type int" % inputs['nelec'])
+    raise ValueError(" '%s' must be type int" % inputs['nelec'])
 if not isinstance(inputs['dr'], float):
-    raise ValueError("Error: '%s' must be type float" % inputs['dr'])
+    raise ValueError(" '%s' must be type float" % inputs['dr'])
 if not isinstance(inputs['occ'], list):
-    raise ValueError("Error: '%s' must be type list of lists of int" % inputs['occ'])
+    raise ValueError(" '%s' must be type list of lists of int" % inputs['occ'])
 if not isinstance(inputs['closed'], list):
-    raise ValueError("Error: '%s' must be type list of lists of int" % inputs['closed'])
+    raise ValueError(" '%s' must be type list of lists of int" % inputs['closed'])
 if not isinstance(inputs['states'], list):
-    raise ValueError("Error: '%s' must be type list of lists of int" % inputs['states'])
+    raise ValueError(" '%s' must be type list of lists of int" % inputs['states'])
 
 # Ensure values of type str are lowercase
 
@@ -181,27 +181,27 @@ inputs['dr'] = inputs['dr']*ang2au
 # Check inputs have acceptable values
 
 if inputs['code'] not in codeExcept:
-    raise ValueError("Error: '%s' not available, choose from %s." % (inputs['code'], codeExcept))
+    raise ValueError(" '%s' not available, choose from %s." % (inputs['code'], codeExcept))
 if inputs['hpc'] not in exceptHPC:
-    raise ValueError("Error: choose from %s." % exceptHPC)
+    raise ValueError(" choose from %s." % exceptHPC)
 if inputs['symm'] not in symmExcept:
-    raise ValueError("Error: choose from %s." % (symmExcept))
+    raise ValueError(" choose from %s." % (symmExcept))
 if inputs['soc'] not in ynExcept:
-    raise ValueError("Error: choose from %s." % (ynExcept))
+    raise ValueError(" choose from %s." % (ynExcept))
 if inputs['nacme'] not in ynExcept:
-    raise ValueError("Error: choose from %s." % (ynExcept))
+    raise ValueError(" choose from %s." % (ynExcept))
 if inputs['grad'] not in ynExcept:
-    raise ValueError("Error: choose from %s." % (ynExcept))
+    raise ValueError(" choose from %s." % (ynExcept))
 if inputs['singlets'] not in ynExcept:
-    raise ValueError("Error: choose from %s." % (ynExcept))
+    raise ValueError(" choose from %s." % (ynExcept))
 if inputs['triplets'] not in ynExcept:
-    raise ValueError("Error: choose from %s." % (ynExcept))
+    raise ValueError(" choose from %s." % (ynExcept))
 if inputs['nacme_level'] not in nacmeExcept:
-    raise ValueError("Error: '%s' not available, choose from %s." % (inputs['nacme_level'], nacmeExcept))
+    raise ValueError(" '%s' not available, choose from %s." % (inputs['nacme_level'], nacmeExcept))
 if inputs['paxis'] not in paxisExcept:
-    raise ValueError("Error: '%s' not available, choose from %s." % (inputs['paxis'], paxisExcept))
+    raise ValueError(" '%s' not available, choose from %s." % (inputs['paxis'], paxisExcept))
 if inputs['spe'] not in exceptSPE:
-    raise ValueError("Error: '%s' not available, choose from %s." % (inputs['spe'], exceptSPE))
+    raise ValueError(" '%s' not available, choose from %s." % (inputs['spe'], exceptSPE))
 
 
 # Check input state and orbitals are correct
@@ -254,20 +254,20 @@ for closedOrb in inputs['closed']:
 if refGeom.shape[0:2] != (len(inputs['atoms']), 3):
     raise InputGeomError(refGeom)
 if submitScript is None and inputs['hpc'] != 'local':
-    raise ValueError("Error: If not running via. a queueing system set hpc input to local")
+    raise ValueError(" If not running via. a queueing system set hpc input to local")
 elif submitScript is not None and inputs['hpc'] == 'none':
-    raise ValueError("Error: If running via. a queueing system set hpc input to 'local', 'Sun Grid Engine' or 'PBS'")
+    raise ValueError(" If running via. a queueing system set hpc input to 'local', 'Sun Grid Engine' or 'PBS'")
 
 if submissionScript is not None and not re.search(r'template', submissionScript):
-    raise ValueError("Error: Place the keyword 'template' where your input file goes in the HPC submission script")
+    raise ValueError(" Place the keyword 'template' where your input file goes in the HPC submission script")
 
 
 # While waiting to add new functionality
 
 if inputs['spe'] == 'mrci' and inputs['grad'] == 'yes':
-    raise ValueError("Error: Gradients for MRCI are yet to be added")
+    raise ValueError(" Gradients for MRCI are yet to be added")
 if inputs['code'] == 'molcas':
-    raise ValueError("Error: Molcas is not yet available")
+    raise ValueError(" Molcas is not yet available")
 
 
 #########################
@@ -326,7 +326,7 @@ def coordinateReader(GeomIn):
     GeomArr = GeomIn*ang2au
     listGeom = []
     dims = GeomArr.shape[2:]
-    ngrid = np.product(dims)
+    ngrid = int(np.product(dims))
     GeomFlat = GeomArr.reshape(len(inputs['atoms']), 3, ngrid)
     for i in range(ngrid):
         listGeom.append(GeomFlat[:, :, i])
