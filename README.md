@@ -44,7 +44,7 @@ If a calculation fails, elements of the output arrays for that grid point are se
 
 ##### File System Structure:
 
-`
+```
 Parent Directory (where script is executed)
     |
     |-> GP_XXXXX/
@@ -61,7 +61,7 @@ Parent Directory (where script is executed)
             |-> NACME_GP_XXXXX.input
 
                 NACME_GP_XXXXX.out
- `           
+ ```          
 
 ### TO DO:
 
