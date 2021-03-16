@@ -9,7 +9,7 @@ from io import StringIO
     storing data, as well as extracting and sorting data from
     each type of calculation"""
 
-ang2au = 1.88973
+ANG2AU = 1.88973
 flatten = lambda nestedList: [item for sublist in nestedList for item in sublist]
 
 
@@ -21,27 +21,26 @@ class ProccessManager(multiprocessing.managers.BaseManager):
 ProccessManager.register('np_zeros', np.zeros, multiprocessing.managers.ArrayProxy)
 
 
-class datastore:
+class DataStore:
     """Global datastoring class for Energies, NACMES, SOCs, Gradients and
        CASPT2 Mixing Matrix. This class is initialised prior to the parallel run.
        Memory sharing between processes is forced for required
        instances using ProcessManager."""
 
-    def __init__(self, refGeom, states: list, couplings: list, ngrid: int, pmanager):
-        self.refGeom = refGeom
+    def __init__(self, natom, states: list, couplings: list, ngrid: int, pmanager):
         self.ngrid = ngrid
-        self.Natm = len(self.refGeom)
+        self.natom = natom
         self.nsinglets = sum(states[0:2])
         self.ntriplets = sum(states[2:4])
         self.nmultiplets = self.nsinglets + (3*self.ntriplets)
         self.nstates = sum(states)
         self.energies = pmanager.np_zeros((ngrid, self.nstates))
         self.couplings = flatten(couplings)
-        self.nacmes = pmanager.np_zeros((self.Natm, 3, len(self.couplings), self.ngrid))
-        self.grads = pmanager.np_zeros((self.Natm, 3, self.nstates, self.ngrid))
+        self.nacmes = pmanager.np_zeros((self.natom, 3, len(self.couplings), self.ngrid))
+        self.grads = pmanager.np_zeros((self.natom, 3, self.nstates, self.ngrid))
         self.socs = pmanager.np_zeros((self.nmultiplets, self.nmultiplets, 2, self.ngrid))
 
-    def energiesExtract(self, outfile: str, programme: str, progregex: str, multi: str, gp: int):
+    def extract_energies(self, outfile: str, programme: str, progregex: str, multi: str, grid_index: int):
         """Extracts energies from a single point calculation at each grid point.
         Takes an outfile path, user specified programme and corrosponding regex,
         if multi, will only extract energies of last projection. Sorts in a global
@@ -50,74 +49,74 @@ class datastore:
         lines = f.readlines()
         f.close()
         if programme == 'casscf':
-            calculationIndex = []
+            calculation_indexs = []
             for idx, line in enumerate(lines):
                 if multi in line:
-                    calculationIndex.append(idx)
-            lines = lines[calculationIndex[-1]:]  # Only final CASSCF projection
+                    calculation_indexs.append(idx)
+            lines = lines[calculation_indexs[-1]:]  # Only final CASSCF projection
             energies = regex(lines, progregex)
-            self.energies[gp, :] = energies
+            self.energies[grid_index, :] = energies
         else:
             energies = regex(lines, progregex)
-            self.energies[gp, :] = energies
+            self.energies[grid_index, :] = energies
 
-    def nacmeExtract(self, outfile: str, nacme_regex: str, gp: int, daxes: list):
+    def extract_nacme(self, outfile: str, nacme_regex: str, grid_index: int, daxes: list):
         """Extracts NACMEs for each grid point, accorindg to each atom/ axis
            and stores in a global array"""
         f = open(outfile, 'r')
         lines = f.readlines()
         f.close()
-        numAxesDisplaced = sum(daxes)
-        displacedAxesIndex = [ind for ind, axis in enumerate(daxes) if axis]
-        nacmeArrayRaw = regex(lines, nacme_regex)  # Array with N combination couplings, N axis displacments and N atoms
-        nacmeAxialSort = np.split(nacmeArrayRaw, numAxesDisplaced)  # Split into 1-3 arrays depending on which axis displaced
-        for count, nacmeAxis in enumerate(nacmeAxialSort):
-            nacmeAtomicSort = np.split(nacmeAxis, self.Natm)  # Split into array for each atom
-            ind = displacedAxesIndex[count]
-            for j in range(self.Natm):
-                self.nacmes[j, ind, :, gp] = nacmeAtomicSort[j]
+        ndisplaced_axes = sum(daxes)
+        displaced_axes_index = [ind for ind, axis in enumerate(daxes) if axis]
+        nacme_array_raw = regex(lines, nacme_regex)  # Array with N combination couplings, N axis displacments and N atoms
+        nacme_axial_sort = np.split(nacme_array_raw, ndisplaced_axes)  # Split into 1-3 arrays depending on which axis displaced
+        for count, nacme_axis in enumerate(nacme_axial_sort):
+            nacme_atomic_sort = np.split(nacme_axis, self.natom)  # Split into array for each atom
+            ind = displaced_axes_index[count]
+            for j in range(self.natom):
+                self.nacmes[j, ind, :, grid_index] = nacme_atomic_sort[j]
 
-    def gradExtractMolpro(self, outfile: str, gradRegex: str, numerical: bool, gp: int):
+    def extract_grad_molpro(self, outfile: str, grad_regex: str, numerical: bool, grid_index: int):
         """Extracts gradients for each atom along each axis as an array.
            Works for both numerical or analytical gradients in molpro. """
         f = open(outfile, 'r')
         lines = f.readlines()
         f.close()
         if numerical:
-            gradLineIndex = [i+5 for i, line in enumerate(lines) if gradRegex in line]
+            grad_line_index = [i+5 for i, line in enumerate(lines) if grad_regex in line]
         else:
-            gradLineIndex = [i+4 for i, line in enumerate(lines) if gradRegex in line]
-        for x, i in enumerate(gradLineIndex):
-            gradMatrixList = lines[i:i+self.Natm]
-            gradMatrixStr = ''.join(gradMatrixList)
-            gradArray = np.genfromtxt(StringIO(gradMatrixStr), usecols=(1, 2, 3), encoding=None)
-            self.grads[:, :, x, gp] = gradArray
+            grad_line_index = [i+4 for i, line in enumerate(lines) if grad_regex in line]
+        for x, i in enumerate(grad_line_index):
+            grad_matrix_list = lines[i:i+self.natom]
+            grad_matrix_str = ''.join(grad_matrix_list)
+            grad_array = np.genfromtxt(StringIO(grad_matrix_str), usecols=(1, 2, 3), encoding=None)
+            self.grads[:, :, x, grid_index] = grad_array
 
-    def extractSOC(self, outfile: str, gp: int):
-        TempSOC = np.zeros((self.nmultiplets, self.nmultiplets, 2))
+    def extract_soc(self, outfile: str, grid_index: int):
+        temp_soc = np.zeros((self.nmultiplets, self.nmultiplets, 2))
         f = open(outfile, 'r')
         lines = f.readlines()
         f.close()
         idx = [i for i, line in enumerate(lines) if 'Nr  State  S   SZ' in line]
-        StateBlock = [int(lines[i].split()[-1]) for i in idx]
-        LastIdx = idx[-1]+((self.nmultiplets*2)+(self.nmultiplets+2))
-        idx.append(LastIdx)
-        StateBlock.insert(0, 0)
+        state_block = [int(lines[i].split()[-1]) for i in idx]
+        last_index = idx[-1]+((self.nmultiplets*2)+(self.nmultiplets+2))
+        idx.append(last_index)
+        state_block.insert(0, 0)
         for j in range(len(idx[0:-1])):
-            MatrixBlockRaw = lines[idx[j]+1:idx[j+1]]
-            MatrixBlockRaw = [line.strip() for line in MatrixBlockRaw]
-            MatrixBlock = list(filter(None, MatrixBlockRaw))
-            RealValuedRaw = [line for i, line in enumerate(MatrixBlock) if i % 2 == 0]
-            RealValued = [' '.join(line.split()[4:]) for line in RealValuedRaw]
-            ImagValued = [line for i, line in enumerate(MatrixBlock) if i % 2 != 0]
-            SOCTempReal = np.genfromtxt(StringIO('\n'.join(RealValued)), encoding=None)
-            SOCTempImag = np.genfromtxt(StringIO('\n'.join(ImagValued)), encoding=None)
-            TempSOC[:, StateBlock[j]:StateBlock[j+1], 0] = SOCTempReal
-            TempSOC[:, StateBlock[j]:StateBlock[j+1], 1] = SOCTempImag
+            matrix_block_raw = lines[idx[j]+1:idx[j+1]]
+            matrix_block_raw = [line.strip() for line in matrix_block_raw]
+            matrix_block = list(filter(None, matrix_block_raw))
+            real_valued_raw = [line for i, line in enumerate(matrix_block) if i % 2 == 0]
+            real_valued = [' '.join(line.split()[4:]) for line in real_valued_raw]
+            imag_valued = [line for i, line in enumerate(matrix_block) if i % 2 != 0]
+            real_soc_temp = np.genfromtxt(StringIO('\n'.join(real_valued)), encoding=None)
+            imag_soc_temp = np.genfromtxt(StringIO('\n'.join(imag_valued)), encoding=None)
+            temp_soc[:, state_block[j]:state_block[j+1], 0] = real_soc_temp
+            temp_soc[:, state_block[j]:state_block[j+1], 1] = imag_soc_temp
 
-        self.socs[:, :, :, gp] = TempSOC
+        self.socs[:, :, :, grid_index] = temp_soc
 
-    def caspt2MatrixExtract():
+    def extract_mixing_matrix():
         pass
 
 
@@ -134,3 +133,8 @@ def regex(lines: list, progregex: str) -> list:
             values.append(float(value))
 
     return np.array(values)
+
+
+def logging(logfile, message):
+    with open(logfile, 'w+') as f:
+        f.write(message)

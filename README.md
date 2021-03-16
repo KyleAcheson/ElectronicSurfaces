@@ -4,17 +4,19 @@ Calculates potential energy surfaces for any tri-atomic molecule given a grid a 
 Can be run using no symmetry or with symmetry on - maximum symmetry is Cs. 
 Currently works for Molpro. 
 
-Runs on any local linux system or any HPC system running either Sun Grid Engine or PBS Pro queueing systems.
+Runs on a local linux system (tested on Ubuntu) or any HPC system running either Sun Grid Engine or PBS Pro queueing systems.
 
 Requires Python 3.5.2+ and Numpy.
 
 ### To run:
 
-`python production_surfaces.py -inp input.json -g geom.xyz &`
+`python production_surfaces.py -inp input.json -g [geometry_file] &`
+
+`[geometry_file]` = .npy or .mat file containing array of geometries over configuration space (in Angstrom)! 
 
 Running on a HPC queueing system: `./production_surfaces.py -inp input.json -g geom.xyz -q [template filename]` 
 
-For help: `./production_surfaces.py --help`
+For help: `python production_surfaces.py --help`
 
 Ensure inputs are specified in Angstroms - programme will convert to bohr.
 
@@ -40,6 +42,25 @@ The progamme will save all output data to .npy files. The index for each grid po
 
 If a calculation fails, elements of the output arrays for that grid point are set to NaN.
 
+##### File System Structure:
+
+Parent Directory (where script is executed)
+    |
+    |-> GP_XXXXX/
+        |
+        |-> SPE_GP_XXXXX.input
+            SPE_GP_XXXXX.out
+            SPE_GP_XXXXX.molden
+            GRADS/
+            |
+            |-> GRAD_GP_XXXXX.input
+                GRAD_GP_XXXXX.out
+            NACMES/
+            |
+            |-> NACME_GP_XXXXX.input
+                NACME_GP_XXXXX.out
+            
+
 ### TO DO:
 
 - [x] Routine for setting up geometries at each point.
@@ -62,8 +83,6 @@ If a calculation fails, elements of the output arrays for that grid point are se
 
 - [x] Routine for calculating analytical gradients (CASSCF).
 
-- [ ] Routine for calculating numerical gradients (MRCI).
-
 - [x] Logic throughout whole programme to determine symmetry vs no symmetry calculations.
 
 - [x] Routines to store output data in arrays - energies, gradients, NACMEs.
@@ -72,10 +91,12 @@ If a calculation fails, elements of the output arrays for that grid point are se
 
 - [x] Routine to extract SOC.
 
-- [ ] Caclulations in CSF basis.
-
-- [ ] Routine to extract CASPT2 mixing matrix.
+- [x] Caclulations in CSF basis.
 
 - [x] Add functionality to run on a HPC queuing system.
+
+- [ ] Routine for calculating numerical gradients (MRCI).
+
+- [ ] Routine to extract CASPT2 mixing matrix.
 
 - [ ] Extend to Molcas - Framework already in place, just rewrite molpro.py in molcas format in molcas.py. 

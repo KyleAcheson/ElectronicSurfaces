@@ -4,37 +4,37 @@ import time
 import re
 
 ''' This module contains routines for both quantum codes which submit the jobs,
-    check their status and wait for termination. Compatible with any local linux
-    system, and Sun Grid Engine or PBS Pro HPC systems. '''
+    check their status and wait for termination. Compatible with linux
+    (tested with Ubuntu), Sun Grid Engine and PBS Pro HPC systems. '''
 
 
-def runCalculation(system: str, codeKeys: dict, pwd: str, workdir: str, inputfile: str, submitscript: str, index: int):
+def run_calculation(system: str, code_keys: dict, pwd: str, workdir: str, inputfile: str, submit_script: str, index: int):
     '''Submits calculations to either a local linux OS, or a HPC running eithers Sun Grid Engine or PBS Pro.
        Waits for calculation to finish running and then returns True if it terminated with no errors. '''
     outputfile = inputfile.split('.')[0]+'.out'
     os.chdir('%s' % (workdir))
 
     if system == 'local':  #  Run calculation and wait for termination in each case
-        runLocal(codeKeys, inputfile)
+        run_local(code_keys, inputfile)
     elif system == 'sun grid engine':
-        gridEngineScript = setup_submit_script(submitscript, inputfile, index)
-        qsub(gridEngineScript)
+        grid_engine_script = setup_submit_script(submit_script, inputfile, index)
+        qsub(grid_engine_script)
     elif system == 'pbs':
         pass
 
-    terminationCode = calculationTermination(codeKeys, outputfile)  #  check normal termination
+    termination_code = calculation_termination(code_keys, outputfile)  #  check normal termination
     os.chdir(pwd)
-    return terminationCode, outputfile
+    return termination_code, outputfile
 
 
-def calculationTermination(codeKeys, outputfile):
+def calculation_termination(code_keys, outputfile):
     ''' Check final line of output for termination code. '''
-    lastline = str(subprocess.check_output(['tail', '-1', outputfile]))
-    if codeKeys['termination_code'] in lastline:
-        normalTermination = True
+    last_line = str(subprocess.check_output(['tail', '-1', outputfile]))
+    if code_keys['termination_code'] in last_line:
+        NormTerm = True
     else:
-        normalTermination = False
-    return normalTermination
+        NormTerm = False
+    return NormTerm
 
 ############################
 # Setup for local linux OS #
@@ -55,13 +55,13 @@ def getPID(inputfile: str) -> int:
     return pid
 
 
-def runLocal(codeKeys: dict, inputfile: str):
+def run_local(code_keys: dict, inputfile: str):
     '''This function submits a single point energy and SO calculation at
         each point in the grid. Starting in the parent directory it opens the
         sub-directory at the grid point and submits the job, waiting until
         the job PID no longer exists. '''
 
-    subprocess.Popen(['%s %s &' % (codeKeys['submit_command'], inputfile)],
+    subprocess.Popen(['%s %s &' % (code_keys['submit_command'], inputfile)],
                      shell=True, preexec_fn=os.setsid)  # Submit job
     pid = getPID(inputfile)
     time.sleep(1)
@@ -81,21 +81,21 @@ def subprocess_cmd(command, return_stdout):
         return(proc_stdout)
 
 
-def setup_submit_script(submitScript: str, inputfile: str, index: int):
+def setup_submit_script(submit_script: str, inputfile: str, index: int):
     ''' Set up input for Grid Engine submission script.
         Job name follows the form [calculation type][grid point index]. '''
     subjobFile = "submit_GP%s.sh" % index
     inputid = inputfile.split('.')[0]
-    submitScriptGP = re.sub(r'template', inputid, submitScript)
+    submit_scriptGP = re.sub(r'template', inputid, submit_script)
     f = open(subjobFile, 'w+')
-    f.write(submitScriptGP)
+    f.write(submit_scriptGP)
     f.close()
     return subjobFile
 
 
-def submit_qsub_job(submitScript, params='-j y'):
+def submit_qsub_job(submit_script, params='-j y'):
     ''' Submits job to Grid Engine. Returns output. '''
-    qsub_command = 'qsub %s %s' % (params, submitScript)
+    qsub_command = 'qsub %s %s' % (params, submit_script)
     proc_stdout = subprocess_cmd(command=qsub_command, return_stdout=True)
     return(proc_stdout)
 
@@ -156,10 +156,10 @@ def check_grid_termination(job_id, job_name):
         print('job %s has finished' % job_name)
 
 
-def qsub(submitScript):
+def qsub(submit_script):
     ''' Submit a job using a submission script, wait for job to start
         and for terminaton. '''
-    proc_stdout = submit_qsub_job(submitScript)
+    proc_stdout = submit_qsub_job(submit_script)
     job_id, job_name = get_qsub_job_ID_name(proc_stdout)
     wait_qsub_job_start(job_id, job_name)
     check_grid_termination(job_id, job_name)
