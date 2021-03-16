@@ -45,19 +45,33 @@ If a calculation fails, elements of the output arrays for that grid point are se
 ##### File System Structure:
 
 Parent Directory (where script is executed)
+
     |
+
     |-> GP_XXXXX/
+
         |
+
         |-> SPE_GP_XXXXX.input
+
             SPE_GP_XXXXX.out
+
             SPE_GP_XXXXX.molden
+
             GRADS/
+
             |
+
             |-> GRAD_GP_XXXXX.input
+
                 GRAD_GP_XXXXX.out
+
             NACMES/
+
             |
+
             |-> NACME_GP_XXXXX.input
+
                 NACME_GP_XXXXX.out
             
 
