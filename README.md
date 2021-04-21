@@ -25,15 +25,22 @@ WARNING - will take a long time to run as jobs are runs in batches of nproc-2.
 Currently, available for Sun Grid Engine. Easily extendable to other systems e.g. Slurm, PBS etc.
 
 First set up all inputs using `-s` flag. 
+
 `python production_surfaces.py -i input.json -g [geometry_file] -s &`
 
+
 Next, submit each type of job to the scheduling system.
+
 `python production_surfaces.py -i input.json -g [geometry_file] -r [run_argument] -q [submission_script] &`
+
 Where, `[run_argument]` is one of the following strings, `'energies'`, `'nacmes'`, `'gradients'`.
 This will submit all jobs to the scheduling system, and will not wait for termination of the jobs.
 
+
 Finally, once all calculations are finished. Collect the data.
+
 `python production_surfaces.py -i input.json -g [geometry_file] -c &`
+
 This will result in several .npy files, one for each type of calculation.
 
 ##### Input Arguments:
