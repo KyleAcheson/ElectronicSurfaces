@@ -52,11 +52,12 @@ def setup_spe(inputs: dict, geom, pwd: str, grid_index: int) -> str:
     singlets = inputs['singlets']
     triplets = inputs['triplets']
     inputfile = 'SPE_GP%s.input' % grid_index
+    molden = inputfile.split('.')[0]+'.molden'
     #  Initialise SPE calculation for given geometry.
     init_calculation = "***PES Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
     geometry_block = geometry_setup(inputs, geom)
     geometry_block = '\n'.join(geometry_block)
-    spe_calculation_input.extend([init_calculation, geometry_block])
+    spe_calculation_input.extend([init_calculation, geometry_block, 'hf'])
 
     #  Set up chosen electronic structure theory
     casscf = setup_casscf(inputs, states, singlets, triplets, nacme=False)
@@ -83,6 +84,8 @@ def setup_spe(inputs: dict, geom, pwd: str, grid_index: int) -> str:
             soc = "{ci;hlsmat,amfi,%s\nprint,hls=1};" % (','.join(records))
             spe_calculation_input.append(soc)
 
+    molden_str = "put,molden,%s;" % molden
+    spe_calculation_input.append(molden_str)
     spe_calculation_input = '\n'.join(spe_calculation_input)
     f = open(workdir+inputfile, 'w+')
     f.write(spe_calculation_input)
@@ -125,8 +128,8 @@ def main_nacme(inputs: dict, referance_geom, workdir: str, grid_index: int):
     elif inputs['namcme_level'] == 'mrci':
         noexc = False
 
-    init_calculationulation = "***NACME Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
-    nacme_calculation_input.append(init_calculationulation)
+    init_calculation = "***NACME Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
+    nacme_calculation_input.append(init_calculation)
 
     if inputs['singlets'] == 'yes' and inputs['triplets'] == 'yes':
         singlet_states = format_states(states, singlet=True, triplet=False)
@@ -137,7 +140,9 @@ def main_nacme(inputs: dict, referance_geom, workdir: str, grid_index: int):
         triplet_states = format_states(states, singlet=False, triplet=True)
         singlets, triplets = 'no', 'yes'
         [triplet_calculation_input, displaced_axes_list] = setup_nacme(inputs, triplet_states, singlets, triplets, referance_geom, noexc)
-        nacme_calculation_input.append(triplet_calculation_input)
+        triplet_calculation_inputB = re.sub(r'hf', '', triplet_calculation_input)
+        lines = triplet_calculation_inputB.split('\n')
+        nacme_calculation_input.append(triplet_calculation_inputB)
 
     else:
         [nacme, displaced_axes_list] = setup_nacme(inputs, states, singlets, triplets, referance_geom, noexc)
@@ -205,7 +210,7 @@ def setup_referance_nacme(inputs: dict, states: list, referance_geom, singlets: 
     referance_nacme = []
     geometry_block = geometry_setup(inputs, referance_geom)
     casscf = setup_casscf(inputs, states,  singlets, triplets, nacme=False)
-    referance_nacme.extend(['\n'.join(geometry_block), '\n'.join(casscf), '\n'])
+    referance_nacme.extend(['\n'.join(geometry_block), 'hf', '\n'.join(casscf), '\n'])
     # Set up following CI calculation for reference - do tdm calculation
     states = states[-1]
     ciwf = setup_mrci(inputs, states,  6000.2, 8000.2, noexc, tdm=True)  # ADD new state functionality
@@ -284,7 +289,7 @@ def setup_gradient(inputs: dict, geom, workdir: str, grid_index: int):
     inputfile = "GRAD_GP%s.input" % grid_index
     init_calculation = "***GRAD Calculation\nmemory,%s\nprint,orbitals,civectors;\n" % (inputs['mem'])
     geometry_block = geometry_setup(inputs, geom)
-    gradient_calculation_input.extend([init_calculation, '\n'.join(geometry_block)])
+    gradient_calculation_input.extend([init_calculation, '\n'.join(geometry_block), 'hf'])
     if inputs['spe'] != 'mrci':
         if inputs['singlets'] and inputs['triplets'] == 'yes':
             singlet_states = format_states(states, singlet=True, triplet=False)
@@ -481,10 +486,10 @@ def geometry_setup(inputs: dict, geom) -> list:
     geometry_block = []
     basis = "basis=%s" % inputs['basis']
 
-    if inputs['symm'] != 'nosymm':
+    if inputs['symm'] != 'nosymmetry':
         symmetry = "symmetry,%s" % inputs['symm']
     else:
-        symmetry = "symmetry,nosymm"
+        symmetry = "symmetry,nosymmetry"
 
     geom = format_geometry(geom, inputs['atoms'])  # Format array into coords w/ atomic symbols in column 0
     geometry = "geomtyp=xyz\nbohr\ngeometry={\n%s\nSurf Calc\n%s\n}" % (len(inputs['atoms']), geom)
@@ -510,9 +515,8 @@ def setup_casscf(inputs: dict, total_states: list, singlets: str, triplets: str,
         init_singlet_wf, init_triplet_wf = '', ''
     if nacme:
         init_singlet_wf, init_triplet_wf = '\nstart,2140.2', '\nstart,2141.2'
-    casscf_calculation_input.append('{hf}')
 
-    if inputs['symm'] != 'nosymm':
+    if inputs['symm'] != 'nosymmetry':
         for i in range(len(total_states)):  # Loop over projections
             occ = inputs['occ'][i]
             closed = inputs['closed'][i]    # Init active spaces and num. states
@@ -536,8 +540,8 @@ def setup_casscf(inputs: dict, total_states: list, singlets: str, triplets: str,
                 wf4 = "wf,%s,2,2\nstate,%s\n};" % (inputs['nelec'], states[3])
                 casscf_calculation_input.extend([triplet_casscf, wf3, wf4])
 
-    elif inputs['symm'] == 'nosymm':
-        for i in range(len(states)):
+    elif inputs['symm'] == 'nosymmetry':
+        for i in range(len(total_states)):
             occ = inputs['occ'][i]
             closed = inputs['closed'][i]
             states = total_states[i]

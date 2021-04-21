@@ -40,7 +40,7 @@ class DataStore:
         self.grads = pmanager.np_zeros((self.natom, 3, self.nstates, self.ngrid))
         self.socs = pmanager.np_zeros((self.nmultiplets, self.nmultiplets, 2, self.ngrid))
 
-    def extract_energies(self, outfile: str, programme: str, progregex: str, multi: str, grid_index: int):
+    def extract_energies(self, inputs: dict,  outfile: str, progregex: str, multi: str, grid_index: int):
         """Extracts energies from a single point calculation at each grid point.
         Takes an outfile path, user specified programme and corrosponding regex,
         if multi, will only extract energies of last projection. Sorts in a global
@@ -48,12 +48,13 @@ class DataStore:
         f = open(outfile, 'r')
         lines = f.readlines()
         f.close()
-        if programme == 'casscf':
-            calculation_indexs = []
-            for idx, line in enumerate(lines):
-                if multi in line:
-                    calculation_indexs.append(idx)
-            lines = lines[calculation_indexs[-1]:]  # Only final CASSCF projection
+        if inputs['spe'] == 'casscf':
+            if inputs['singlets'] == 'yes' and inputs['triplets'] == 'yes':
+                calculation_indexes = [idx for idx, line in enumerate(lines) if multi in line]
+                lines = lines[calculation_indexes[-2]:]
+            else:
+                calculation_indexes = [idx for idx, line in enumerate(lines) if multi in line]
+                lines = lines[calculation_indexs[-1]:]  # Only final CASSCF projection
             energies = regex(lines, progregex)
             self.energies[grid_index, :] = energies
         else:
@@ -135,6 +136,64 @@ def regex(lines: list, progregex: str) -> list:
     return np.array(values)
 
 
+def split_list(alist, chunks):
+    """Splits a list into a list of lists with equal no. elements (chunks)"""
+    new_list = []
+    for i in range(0, len(alist), chunks):
+        new_list.append(alist[i:i+chunks])
+    return new_list
+
+
 def logging(logfile, message):
     with open(logfile, 'w+') as f:
         f.write(message)
+
+
+def extract_energies_test(inputs: dict,  outfile: str, progregex: str, multi: str):
+    """Extracts energies from a single point calculation at each grid point.
+    Takes an outfile path, user specified programme and corrosponding regex,
+    if multi, will only extract energies of last projection. Sorts in a global
+    array according to the grid point index."""
+    f = open(outfile, 'r')
+    lines = f.readlines()
+    f.close()
+    Energies = np.zeros((1, 19))
+    if inputs['spe'] == 'casscf':
+        if inputs['singlets'] == 'yes' and inputs['triplets'] == 'yes':
+            calculation_indexes = [idx for idx, line in enumerate(lines) if multi in line]
+            lines = lines[calculation_indexes[-2]:]
+        else:
+            calculation_indexes = [idx for idx, line in enumerate(lines) if multi in line]
+            lines = lines[calculation_indexes[-1]:]  # Only final CASSCF projection
+        energies = regex(lines, progregex)
+        Energies[0, :] = energies
+    else:
+        energies = regex(lines, progregex)
+        Energies[0, :] = energies
+    return Energies
+
+
+def extract_soc_test(outfile: str, grid_index: int):
+    SOC = np.zeros((39, 39, 2))
+    temp_soc = np.zeros((39, 39, 2))
+    f = open(outfile, 'r')
+    lines = f.readlines()
+    f.close()
+    idx = [i for i, line in enumerate(lines) if 'Nr  State  S   SZ' in line]
+    state_block = [int(lines[i].split()[-1]) for i in idx]
+    last_index = idx[-1]+((39*2)+(39+2))
+    idx.append(last_index)
+    state_block.insert(0, 0)
+    for j in range(len(idx[0:-1])):
+        matrix_block_raw = lines[idx[j]+1:idx[j+1]]
+        matrix_block_raw = [line.strip() for line in matrix_block_raw]
+        matrix_block = list(filter(None, matrix_block_raw))
+        real_valued_raw = [line for i, line in enumerate(matrix_block) if i % 2 == 0]
+        real_valued = [' '.join(line.split()[4:]) for line in real_valued_raw]
+        imag_valued = [line for i, line in enumerate(matrix_block) if i % 2 != 0]
+        real_soc_temp = np.genfromtxt(StringIO('\n'.join(real_valued)), encoding=None)
+        imag_soc_temp = np.genfromtxt(StringIO('\n'.join(imag_valued)), encoding=None)
+        temp_soc[:, state_block[j]:state_block[j+1], 0] = real_soc_temp
+        temp_soc[:, state_block[j]:state_block[j+1], 1] = imag_soc_temp
+    SOC[:, :, :] = temp_soc
+    return SOC

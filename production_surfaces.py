@@ -1,8 +1,8 @@
-#!/usr/bin/python3
 import os
 import re
 import sys
 import multiprocessing
+from itertools import repeat
 import numpy as np
 import argparse
 import textwrap
@@ -16,14 +16,14 @@ import molcas
 ANG2AU = 1.88973
 
 parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
-parser.add_argument("-inp", dest="inputfile", required=True, type=str,
+parser.add_argument("-i", "--input", dest="inputfile", required=True, type=str,
                     help=textwrap.dedent('''\
                     Input options in Json format\n
                     Required Input Specifications:\n
                     "code": molpro/molcas
                     "hpc" : HPC system - 'local', 'Sun Grid Engine' or 'PBS'
                     "mem": file memory
-                    "symm": Symmetry generator (X, Y, Z) or  'nosymm' - max Cs symmetry
+                    "symm": Symmetry generator (X, Y, Z) or  'nosymmetry' - max Cs symmetry
                     "basis": basis set in chosen programme format
                     "soc": yes/no
                     "nacme": yes/no
@@ -48,19 +48,40 @@ parser.add_argument("-inp", dest="inputfile", required=True, type=str,
                     that corrospond to Irrep2 to 0.\n
                     If running singlet or triplet states only, set the multiplicity
                     you wish to ommit to 0.\n'''))
-parser.add_argument("-g", dest="geom_inputfile", required=True, type=str,
+parser.add_argument("-g", "--geom", dest="geom_inputfile", required=True, type=str,
                     help=textwrap.dedent('''\
                     Nd Array of Geometry in xyz coordinates (ANGSTROM) over all space\n
                     Must be of type .mat or .npy\n
                     Must have dimensions (Natom, 3, Ngrid DoF1, Ngrid DoF2, ..., Ngrid DoFN)\n
-                    Degrees of freedom will be flattened from left to right to give a list of geometries\n'''))
+                    Degrees of freedom will be flattened from left to right to give a list of geometries.\n'''))
+parser.add_argument("-s", "--setup", dest="SetupArg", required=False, action='store_true',
+                   help=textwrap.dedent('''\
+                   Setup ALL input files for all calculations specified in input file.
+                   Programme will terminate once all files are setup, no jobs are submitted.\n'''))
+parser.add_argument("-r", "--run", dest="run_argument", required=False, type=str,
+                    help=textwrap.dedent('''\
+                    Run ALL calculations of specified type (only recomended on queueing sysetm):\n
+                    energies - Run SPE and SOC calculation (if requested).
+                    nacmes - Run NACME calculations.
+                    gradients - Run gradient calculations.\n'''))
+parser.add_argument("-b", "--batch", dest="BatchRun", required=False, action='store_true',
+                    help=textwrap.dedent('''\
+                    Setup and run all calculations, WAITS and collects data in real time.
+                    Recommended on smaller servers with no queueing system in place.
+                    Will run jobs in batches of nprocs-2.\n'''))
+parser.add_argument("-c", "--collect", dest="ExtractArg", required=False, action='store_true',
+                    help="Collect all relevent data from output files.\n")
 parser.add_argument("-q", dest="hpc_script", required=False, type=str,
-                    help="Submission script template for running on a HPC queueing system.")
+                    help="Submission script template for running on a HPC queueing system.\n")
 
 args = parser.parse_args()
 inp = args.inputfile
 input_geom = args.geom_inputfile
 submit_script = args.hpc_script
+run_argument = args.run_argument
+SetupArg = args.SetupArg
+ExtractArg = args.ExtractArg
+BatchRun = args.BatchRun
 
 # Load inputs
 f = open(inp, 'r')
@@ -90,6 +111,11 @@ try:
 except TypeError:
     submission_script = None
 
+run_argument_input = ['energies', 'nacmes', 'gradients']
+if run_argument:
+    if run_argument not in run_argument_input:
+        raise ValueError("Run argument accepts a string: 'energies', 'nacmes', 'gradients'.")
+
 
 ##################
 #  Sanity Checks #
@@ -102,7 +128,7 @@ required_inputs = ["code", "hpc", "mem", "symm", "basis", "soc", "dr", "paxis",
 
 code_except = ['molpro', 'molcas']
 yn_except = ['yes', 'no']  # For all y/n inputs
-symm_except = ['x', 'y', 'z', 'nosymm']
+symm_except = ['x', 'y', 'z', 'nosymmetry']
 nacme_except = ['casscf', 'mrci']
 paxis_except = ['x', 'y', 'z']
 except_spe = ['casscf', 'mrci', 'caspt2']
@@ -208,10 +234,10 @@ if inputs['spe'] not in except_spe:
 
 if inputs['singlets'] == 'yes':
     for nstates in inputs['states']:
-        if inputs['symm'] != 'nosymm':
+        if inputs['symm'] != 'nosymmetry':
             if not isinstance(nstates[0], int) or not isinstance(nstates[1], int):
                 raise ValueError('Please set number of singlet states')
-        elif inputs['symm'] == 'nosymm':
+        elif inputs['symm'] == 'nosymmetry':
             if not isinstance(nstates[0], int) or nstates[1] != 0:
                 raise ValueError('Please set number of singlet states for irrep 1 to an integer and irrep 2 to 0.')
 elif inputs['singlets'] == 'no':
@@ -221,10 +247,10 @@ elif inputs['singlets'] == 'no':
 
 if inputs['triplets'] == 'yes':
     for nstates in inputs['states']:
-        if inputs['symm'] != 'nosymm':
+        if inputs['symm'] != 'nosymmetry':
             if not isinstance(nstates[2], int) or not isinstance(nstates[3], int):
                 raise ValueError('Please set number of triplet states')
-        elif inputs['symm'] == 'nosymm':
+        elif inputs['symm'] == 'nosymmetry':
             if not isinstance(nstates[2], int) or nstates[3] != 0:
                 raise ValueError('Please set number of triplet states for irrep 1 to an integer and irrep 2 to 0.')
 elif inputs['triplets'] == 'no':
@@ -233,10 +259,10 @@ elif inputs['triplets'] == 'no':
             raise ValueError('Triplets input set to no, please set triplet states for both irreps to 0.')
 
 for occ_orb in inputs['occ']:
-    if inputs['symm'] != 'nosymm':
+    if inputs['symm'] != 'nosymmetry':
         if not isinstance(occ_orb[0], int) or not isinstance(occ_orb[1], int):
             raise ValueError('Ensure occupied orbitals are integers for both irreps.')
-    elif inputs['symm'] == 'nosymm':
+    elif inputs['symm'] == 'nosymmetry':
         if not isinstance(occ_orb[0], int) or occ_orb[1] != 0:
             raise ValueError('Ensure occupied orbitals of irrep 1 is an integer and irrep 2 is 0.')
 
@@ -244,7 +270,7 @@ for closed_orb in inputs['closed']:
     if inputs['symm'] == 'yes':
         if not isinstance(closed_orb[0], int) or not isinstance(closed_orb[1], int):
             raise ValueError('Ensure closed orbitals are integers for both irreps.')
-    elif inputs['symm'] == 'nosymm':
+    elif inputs['symm'] == 'nosymmetry':
         if not isinstance(closed_orb[0], int) or closed_orb[1] != 0:
             raise ValueError('Ensure closed orbitals of irrep 1 is an integer and irrep 2 is 0.')
 
@@ -337,41 +363,138 @@ def coordinate_reader(raw_geom):
 ##################################
 
 
+def setup(grid_point):
+    index, geom = grid_point
+    parent = os.getcwd()
+    if inputs['code'] == 'molpro':
+        [spe_wdir, spe_inputfile] = molpro.setup_spe(inputs, geom, pwd, index)
+        if inputs['nacme'] == 'yes':
+            [nacme_wdir, nacme_inputfile, displaced_axes] = molpro.main_nacme(inputs, geom, spe_wdir, index)
+        if inputs['grad'] == 'yes':
+            [grad_wdir, grad_inputfile] = molpro.setup_gradient(inputs, geom, spe_wdir, index)
+
+    elif inputs['code'] == 'molcas':
+        pass
+
+
 def run(grid_point):
+    index, geom, calculation_type = grid_point
+    spe_dir = '%s/GP%s/' % (pwd, index)
+    spe_inputfile = 'SPE_GP%s.input' % index
+    if inputs['code'] == 'molpro':
+        if calculation_type ==  'energies':
+            spe_output = util.run_calculation(inputs['hpc'], molpro_keys,
+                                              pwd, spe_dir,
+                                              spe_inputfile, submission_script,
+                                              index, BatchRun)
+        elif calculation_type == 'nacmes':
+            nacme_dir = '%s/NACMEs/' % spe_dir
+            nacme_inputfile = 'NACME_GP%s.input' % index
+            nacme_output = util.run_calculation(inputs['hpc'], molpro_keys,
+                                                pwd, nacme_dir,
+                                                nacme_inputfile, submission_script,
+                                                index, BatchRun)
+
+        elif calculation_type == 'gradients':
+            grad_dir = '%s/GRAD/' % spe_dir
+            grad_inputfile = 'GRAD_GP%s.input' % index
+            grad_output = util.run_calculation(inputs['hpc'], molpro_keys,
+                                               pwd, grad_dir,
+                                               grad_inputfile, submission_script,
+                                               index, BatchRun)
+
+    elif inputs['code'] == 'molcas':
+        pass
+
+
+def extract(grid_point):
+    index, geom = grid_point
+    spe_dir = '%s/GP%s/' % (pwd, index)
+    spe_inputfile = 'SPE_GP%s.input' % index
+    if inputs['code'] == 'molpro':
+        if inputs['nacme'] == 'yes':
+            pass
+        elif inputs['gradients'] == 'yes':
+            pass
+
+    elif inputs['code'] == 'molcas':
+        pass
+
+
+
+def run_all(grid_point):
     """Takes each geometry and an index for each grid point and runs the series
        of calculations specified by the user for either quantum chemistry code
        in parallel. Data for each grid point is sorted in global arrays according
        to the index."""
     index, geom = grid_point
+    #print("INDEX: %s - STARTED" % index)
     parent = os.getcwd()
-    checkfile = "%s/Check_GP%s.chk" % (parent, index)
+    checkfile = "%s/CHECK/Check_GP%s.chk" % (parent, index)
     setup.logging(checkfile, message='Calculation started!')
-    logfile = "%s/Err_GP%s.log" % (parent, index)
+    logfile = "%s/ERRORS/Err_GP%s.log" % (parent, index)
 
     if inputs['code'] == 'molpro':
 
         [spe_wdir, spe_inputfile] = molpro.setup_spe(inputs, geom, pwd, index)
-        [NormTerm, spe_output] = util.run_calculation(inputs['hpc'], molpro_keys, pwd, spe_wdir, spe_inputfile, submission_script, index)
+        [NormTerm, spe_output] = util.run_calculation(inputs['hpc'],
+                                                      molpro_keys,
+                                                      pwd,
+                                                      spe_wdir,
+                                                      spe_inputfile,
+                                                      submission_script,
+                                                      index)
         if NormTerm:
-            data.extract_energies(spe_wdir+spe_output, inputs['spe'], molpro_keys['energy_regex'],
-                                  molpro_keys['cas_prog'], index)
+            setup.logging(checkfile, message='spe norm term')
+            data.extract_energies(inputs,
+                                  spe_wdir+spe_output,
+                                  molpro_keys['energy_regex'],
+                                  molpro_keys['cas_prog'],
+                                  index)
             if inputs['soc'] == 'yes':
+                setup.logging(checkfile, message='extracting soc')
                 data.extract_soc(spe_wdir+spe_output, index)
 
             if inputs['nacme'] == 'yes':
-                [nacme_wdir, nacme_inputfile, displaced_axes] = molpro.main_nacme(inputs, geom, spe_wdir, index)
-                [NacmeNormTerm, nacme_output] = util.run_calculation(inputs['hpc'], molpro_keys, pwd, nacme_wdir, nacme_inputfile, submission_script, index)
+                setup.logging(checkfile, message='NACME started')
+                [nacme_wdir, nacme_inputfile, displaced_axes] = molpro.main_nacme(inputs,
+                                                                                  geom,
+                                                                                  spe_wdir,
+                                                                                  index)
+                [NacmeNormTerm, nacme_output] = util.run_calculation(inputs['hpc'],
+                                                                     molpro_keys,
+                                                                     pwd,
+                                                                     nacme_wdir,
+                                                                     nacme_inputfile,
+                                                                     submission_script,
+                                                                     index)
                 if NacmeNormTerm:
-                    data.extract_nacme(nacme_wdir+nacme_output, molpro_keys['nacme_regex'], index, displaced_axes)
+                    data.extract_nacme(nacme_wdir+nacme_output,
+                                       molpro_keys['nacme_regex'],
+                                       index,
+                                       displaced_axes)
                 else:
                     setup.logging(logfile, message='NACME FAILED')
                     data.nacmes[:, :, :, index] = 'NaN'
 
             if inputs['grad'] == 'yes':
-                [grad_wdir, grad_inputfile] = molpro.setup_gradient(inputs, geom, spe_wdir, index)
-                [GradNormTerm, grad_output] = util.run_calculation(inputs['hpc'], molpro_keys, pwd, grad_wdir, grad_inputfile, submission_script, index)
+                setup.logging(checkfile, message='GRAD started')
+                [grad_wdir, grad_inputfile] = molpro.setup_gradient(inputs,
+                                                                    geom,
+                                                                    spe_wdir,
+                                                                    index)
+                [GradNormTerm, grad_output] = util.run_calculation(inputs['hpc'],
+                                                                   molpro_keys,
+                                                                   pwd,
+                                                                   grad_wdir,
+                                                                   grad_inputfile,
+                                                                   submission_script,
+                                                                   index)
                 if GradNormTerm:
-                    data.extract_grad_molpro(grad_wdir+grad_output, molpro_keys['grad_regex'], molpro_keys['numerical'], index)
+                    data.extract_grad_molpro(grad_wdir+grad_output,
+                                             molpro_keys['grad_regex'],
+                                             molpro_keys['numerical'],
+                                             index)
                 else:
                     setup.logging(logfile, message='GRAD FAILED')
                     data.grads[:, :, :, index] = 'NaN'
@@ -390,7 +513,6 @@ def run(grid_point):
     elif inputs['code'] == 'molcas':   # TO DO
         pass
 
-
 if __name__ == "__main__":
     pwd = os.getcwd()  # parent dir for all calculations
     list_geom = coordinate_reader(referance_geom_raw)
@@ -398,18 +520,37 @@ if __name__ == "__main__":
         couplings = molpro.state_couplings(inputs['states'][-1])  # All possible state couplings
     elif inputs['code'] == 'molcas':
         pass
-    pmanager = setup.ProccessManager()  # Force global mem sharing for ouput data
-    pmanager.start()
-    data = setup.DataStore(len(inputs['atoms']), inputs['states'][-1], couplings, len(list_geom), pmanager)
-    cpus = int((multiprocessing.cpu_count())/2)
+    cpus = int((multiprocessing.cpu_count())-2)
     pool = multiprocessing.Pool(processes=cpus)
-    pool.map_async(run, [(k, v) for k, v in enumerate(list_geom)])
-    pool.close()
-    pool.join()
-    np.save('ENERGIES.npy', data.energies)  # Extract data
-    if inputs['nacme'] == 'yes':
-        np.save('NACMES.npy', data.nacmes)
-    if inputs['grad'] == 'yes':
-        np.save('GRADS.npy', data.grads)
-    if inputs['soc'] == 'yes':
-        np.save('SOCS.npy', data.socs)
+    if BatchRun:  # run everything in a one-shot fashion
+        pmanager = setup.ProccessManager()  # Force global mem sharing for ouput data
+        pmanager.start()
+        data = setup.DataStore(len(inputs['atoms']),
+                               inputs['states'][-1],
+                               couplings,
+                               len(list_geom),
+                               pmanager)
+        pool.map(run_all, [(k, v) for k, v in enumerate(list_geom)])
+        pool.close()
+        pool.join()
+        np.save('ENERGIES.npy', data.energies)  # Extract data
+        if inputs['nacme'] == 'yes':
+            np.save('NACMES.npy', data.nacmes)
+        if inputs['grad'] == 'yes':
+            np.save('GRADS.npy', data.grads)
+        if inputs['soc'] == 'yes':
+            np.save('SOCS.npy', data.socs)
+
+    elif SetupArg:
+        pool.map(setup, [(k, v) for k, v in enumerate(list_geom)])
+        pool.close()
+        pool.join()
+    elif run_argument:
+        pool.map(run, [(i, k, v) for i, (k, v) in enumerate(zip(list_geom, repeat(run_argument)))])
+        pool.close()
+        pool.join()
+    elif ExtractArg:
+            pass
+    else:
+        raise ValueError("""Please provide instructions.
+                           RUN: %s --help for a list.""" % sys.argv[0])

@@ -8,23 +8,35 @@ import re
     (tested with Ubuntu), Sun Grid Engine and PBS Pro HPC systems. '''
 
 
-def run_calculation(system: str, code_keys: dict, pwd: str, workdir: str, inputfile: str, submit_script: str, index: int):
+def run_calculation(system: str, code_keys: dict, pwd: str, workdir: str, inputfile: str, submit_script: str, index: int, BatchRun: bool):
     '''Submits calculations to either a local linux OS, or a HPC running eithers Sun Grid Engine or PBS Pro.
        Waits for calculation to finish running and then returns True if it terminated with no errors. '''
     outputfile = inputfile.split('.')[0]+'.out'
     os.chdir('%s' % (workdir))
 
-    if system == 'local':  #  Run calculation and wait for termination in each case
-        run_local(code_keys, inputfile)
-    elif system == 'sun grid engine':
-        grid_engine_script = setup_submit_script(submit_script, inputfile, index)
-        qsub(grid_engine_script)
-    elif system == 'pbs':
-        pass
+    if BatchRun:
+        if system == 'local':  #  Run calculation and wait for termination in each case
+            run_local(code_keys, inputfile)
+        elif system == 'sun grid engine':
+            grid_engine_script = setup_submit_script(submit_script, inputfile, index)
+            qsub(grid_engine_script)
+        elif system == 'pbs':
+            pass
+        termination_code = calculation_termination(code_keys, outputfile)  #  check normal termination
+        os.chdir(pwd)
+        return termination_code, outputfile
 
-    termination_code = calculation_termination(code_keys, outputfile)  #  check normal termination
-    os.chdir(pwd)
-    return termination_code, outputfile
+    else:
+        if system == 'local':
+            subprocess.Popen(['%s %s &' % (code_keys['submit_command'], inputfile)],
+                     shell=True, preexec_fn=os.setsid)  # Submit job - do not wait
+        elif system == 'sun grid engine':
+            grid_engine_script = setup_submit_script(submit_script, inputfile, index)
+            submit_qsub_job(grid_engine_script)
+        elif system == 'pbs':
+            pass
+        os.chdir(pwd)
+        return outputfile
 
 
 def calculation_termination(code_keys, outputfile):
